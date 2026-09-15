@@ -210,8 +210,8 @@ class DatabaseHelper {
       // Ambil item dari cart
       final cartItems = await txn.query('pos_cart', where: 'cart_user_id = ? AND cart_status = 0', whereArgs: [userId]);
       
-      // Hitung total jumlah item (Quantity)
-      int totalQty = cartItems.fold(0, (sum, item) => sum + (item['cart_qty'] as int));
+      // Hitung total varian item (berapa baris produk yang berbeda)
+      int totalVarian = cartItems.length;
 
       // 1. Simpan ke tabel SALES
       await txn.insert('sales', {
@@ -223,7 +223,7 @@ class DatabaseHelper {
         'sls_paid_amount': paidAmount,
         'sls_change_amount': changeAmount,
         'sls_payment_method': paymentMethod,
-        'sls_total_item': totalQty, // Kolom baru: Total Qty per Invoice
+        'sls_total_item': totalVarian, // Sekarang berisi jumlah jenis/varian produk
       });
 
       // 2. Pindahkan item ke sale_items
