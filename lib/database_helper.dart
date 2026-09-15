@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
+import 'package:intl/intl.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
@@ -31,15 +32,20 @@ class DatabaseHelper {
       print("File database tidak ada. Harus copy.");
       shouldCopy = true;
     } else {
-      // 2. Jika file ada, cek apakah tabel 'users' dan 'pos_cart' ada di dalamnya
+      // 2. Cek apakah tabel dan kolom lengkap
       try {
         final db = await openDatabase(path);
         final usersTable = await db.rawQuery("SELECT name FROM sqlite_master WHERE type='table' AND name='users'");
         final cartTable = await db.rawQuery("SELECT name FROM sqlite_master WHERE type='table' AND name='pos_cart'");
+        
+        // Cek kolom baru 'itm_cost_price' di sale_items
+        final saleItemsInfo = await db.rawQuery("PRAGMA table_info(sale_items)");
+        bool hasCostPrice = saleItemsInfo.any((col) => col['name'] == 'itm_cost_price');
+        
         await db.close();
         
-        if (usersTable.isEmpty || cartTable.isEmpty) {
-          print("Tabel penting tidak lengkap. Harus timpa.");
+        if (usersTable.isEmpty || cartTable.isEmpty || !hasCostPrice) {
+          print("Skema database tidak lengkap atau versi lama. Menimpa dengan file assets...");
           shouldCopy = true;
         }
       } catch (e) {
@@ -49,7 +55,6 @@ class DatabaseHelper {
     }
 
     if (shouldCopy) {
-      // Hapus file lama jika ada agar tidak konflik saat ditimpa
       if (exists) {
         await File(path).delete();
       }
@@ -76,20 +81,12 @@ class DatabaseHelper {
   // FUNGSI MASTER DATA
   // ==========================================
   
-  // Mengambil semua kategori yang ada
-  Future<List<Map<String, dynamic>>> getCategories() async {
-    final db = await instance.database;
-    return await db.query('categories');
-  }
-
-  // Mengambil kategori utama yang unik (Makanan, Minuman, Cemilan)
   Future<List<String>> getMainCategories() async {
     final db = await instance.database;
     final result = await db.rawQuery('SELECT DISTINCT cat_name FROM categories');
     return result.map((row) => row['cat_name'] as String).toList();
   }
 
-  // Mengambil produk berdasarkan nama kategori utama
   Future<List<Map<String, dynamic>>> getProductsByMainCategory(String? mainCategory) async {
     final db = await instance.database;
     if (mainCategory == null) {
@@ -123,8 +120,7 @@ class DatabaseHelper {
   // FUNGSI POS CART (TEMPORARY SALES)
   // ==========================================
   
-  // Menambah item ke keranjang (atau update qty jika sudah ada)
-  Future<void> addToCart(int userId, String prdSku, int qty, double price) async {
+  Future<void> addToCart(int userId, String prdSku, int qty, double sellingPrice, double costPrice) async {
     final db = await instance.database;
     
     final existing = await db.query(
@@ -141,14 +137,14 @@ class DatabaseHelper {
         'cart_user_id': userId,
         'cart_prd_sku': prdSku,
         'cart_qty': qty,
-        'cart_price': price,
-        'cart_subtotal': qty * price,
+        'cart_price': sellingPrice,
+        'cart_cost_price': costPrice, // Simpan harga modal
+        'cart_subtotal': qty * sellingPrice,
         'cart_status': 0
       });
     }
   }
 
-  // Update quantity spesifik (bisa bertambah atau berkurang)
   Future<void> updateCartQty(int cartId, int newQty) async {
     final db = await instance.database;
     if (newQty <= 0) {
@@ -170,33 +166,90 @@ class DatabaseHelper {
     }
   }
 
-  // Mengambil semua item keranjang yang sedang aktif (status 0)
   Future<List<Map<String, dynamic>>> getActiveCart(int userId) async {
     final db = await instance.database;
     return await db.rawQuery('''
-      SELECT c.*, p.prd_name, p.prd_image 
+      SELECT c.*, p.prd_name, p.prd_image, p.prd_cost_price 
       FROM pos_cart c
       JOIN products p ON c.cart_prd_sku = p.prd_sku
       WHERE c.cart_user_id = ? AND c.cart_status = 0
     ''', [userId]);
   }
 
-  // Menghapus item tertentu dari keranjang
   Future<void> removeFromCart(int cartId) async {
     final db = await instance.database;
     await db.delete('pos_cart', where: 'cart_id = ?', whereArgs: [cartId]);
   }
 
-  // Mengosongkan keranjang saat transaksi dibayar atau dibatalkan
-  Future<void> completeCart(int userId, String invoiceNumber) async {
+  // ==========================================
+  // FUNGSI TRANSAKSI PENJUALAN (SALES)
+  // ==========================================
+
+  Future<String> processPayment({
+    required int userId,
+    required double subtotal,
+    required double paidAmount,
+    required double changeAmount,
+    String paymentMethod = 'Tunai',
+  }) async {
     final db = await instance.database;
-    // Ubah status jadi 1 (selesai) agar tidak muncul lagi di POS
-    await db.update(
-      'pos_cart',
-      {'cart_status': 1},
-      where: 'cart_user_id = ? AND cart_status = 0',
-      whereArgs: [userId],
-    );
+    
+    String datePart = DateFormat('yyyyMMdd').format(DateTime.now());
+    final lastSale = await db.rawQuery('SELECT sls_invoice_number FROM sales ORDER BY sls_transaction_date DESC LIMIT 1');
+    int sequence = 1;
+    if (lastSale.isNotEmpty) {
+      String lastInv = lastSale.first['sls_invoice_number'] as String;
+      if (lastInv.contains(datePart)) {
+        String lastSeqStr = lastInv.split('-').last;
+        sequence = int.parse(lastSeqStr) + 1;
+      }
+    }
+    String invoiceNumber = 'INV-$datePart-${sequence.toString().padLeft(4, '0')}';
+
+    await db.transaction((txn) async {
+      // Ambil item dari cart
+      final cartItems = await txn.query('pos_cart', where: 'cart_user_id = ? AND cart_status = 0', whereArgs: [userId]);
+      
+      // Hitung total jumlah item (Quantity)
+      int totalQty = cartItems.fold(0, (sum, item) => sum + (item['cart_qty'] as int));
+
+      // 1. Simpan ke tabel SALES
+      await txn.insert('sales', {
+        'sls_invoice_number': invoiceNumber,
+        'sls_user_id': userId,
+        'sls_subtotal': subtotal,
+        'sls_discount_amount': 0,
+        'sls_grand_total': subtotal,
+        'sls_paid_amount': paidAmount,
+        'sls_change_amount': changeAmount,
+        'sls_payment_method': paymentMethod,
+        'sls_total_item': totalQty, // Kolom baru: Total Qty per Invoice
+      });
+
+      // 2. Pindahkan item ke sale_items
+      for (var item in cartItems) {
+        await txn.insert('sale_items', {
+          'itm_sale_id': invoiceNumber,
+          'itm_sku': item['cart_prd_sku'],
+          'itm_discount': 0,
+          'itm_cashback': 0,
+          'itm_quantity': item['cart_qty'],
+          'itm_unit_price': item['cart_price'],
+          'itm_cost_price': item['cart_cost_price'], // Simpan harga modal saat ini
+          'itm_subtotal': item['cart_subtotal'],
+        });
+      }
+
+      // 3. Update status pos_cart
+      await txn.update(
+        'pos_cart',
+        {'cart_status': 1},
+        where: 'cart_user_id = ? AND cart_status = 0',
+        whereArgs: [userId],
+      );
+    });
+
+    return invoiceNumber;
   }
 
   Future close() async {

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'dart:async';
 import '../../database_helper.dart';
 
 class PosPage extends StatefulWidget {
@@ -18,7 +19,6 @@ class _PosPageState extends State<PosPage> {
   double _total = 0;
   bool _isLoading = true;
 
-  // Format IDR: Titik sebagai pemisah ribuan, tanpa desimal
   final _currencyFormat = NumberFormat.currency(
     locale: 'id_ID',
     symbol: 'Rp ',
@@ -67,6 +67,7 @@ class _PosPageState extends State<PosPage> {
       product['prd_sku'],
       1,
       product['prd_selling_price'],
+      product['prd_cost_price'], // Menambahkan harga modal
     );
     _refreshCart();
   }
@@ -122,10 +123,131 @@ class _PosPageState extends State<PosPage> {
     );
   }
 
+  // --- MODAL PEMBAYARAN ---
+  void _showPaymentDialog() {
+    final TextEditingController paidController = TextEditingController();
+    double paidAmount = 0;
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            double change = paidAmount - _total;
+            bool isEnough = paidAmount >= _total;
+
+            return AlertDialog(
+              title: const Text('Proses Pembayaran'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Total Belanja: ${_currencyFormat.format(_total)}', 
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  const SizedBox(height: 20),
+                  TextField(
+                    controller: paidController,
+                    keyboardType: TextInputType.number,
+                    autofocus: true,
+                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                    decoration: const InputDecoration(
+                      labelText: 'Uang Dibayar',
+                      prefixText: 'Rp ',
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (value) {
+                      setModalState(() {
+                        paidAmount = double.tryParse(value) ?? 0;
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 15),
+                  if (!isEnough && paidAmount > 0)
+                    Text('Kurang: ${_currencyFormat.format(_total - paidAmount)}', 
+                      style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                  if (isEnough)
+                    Text('Kembalian: ${_currencyFormat.format(change)}', 
+                      style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 18)),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context), 
+                  child: const Text('BATAL')
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
+                  onPressed: isEnough ? () async {
+                    // Pindah ke database
+                    await DatabaseHelper.instance.processPayment(
+                      userId: widget.user['usr_id'],
+                      subtotal: _total,
+                      paidAmount: paidAmount,
+                      changeAmount: change,
+                    );
+                    
+                    if (!mounted) return;
+                    Navigator.pop(context); // Tutup dialog bayar
+                    
+                    // Tampilkan sukses popup
+                    _showSuccessDialog(change);
+                    
+                    // Refresh cart jadi kosong
+                    _refreshCart();
+                  } : null,
+                  child: const Text('KONFIRMASI BAYAR'),
+                ),
+              ],
+            );
+          }
+        );
+      },
+    );
+  }
+
+  void _showSuccessDialog(double change) {
+    Timer? timer;
+    showDialog(
+      context: context,
+      builder: (context) {
+        timer = Timer(const Duration(seconds: 3), () {
+          if (Navigator.canPop(context)) {
+            Navigator.pop(context);
+          }
+        });
+        return AlertDialog(
+          icon: const Icon(Icons.check_circle, color: Colors.green, size: 60),
+          title: const Text('Pembayaran Berhasil!'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Transaksi telah disimpan.'),
+              const SizedBox(height: 10),
+              if (change > 0)
+                Text('Kembalian: ${_currencyFormat.format(change)}', 
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                timer?.cancel();
+                Navigator.pop(context);
+              },
+              child: const Text('OK'),
+            )
+          ],
+        );
+      },
+    ).then((_) => timer?.cancel());
+  }
+
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
+        // ================= KIRI: GALERI PRODUK =================
         Expanded(
           flex: 2,
           child: Column(
@@ -203,6 +325,7 @@ class _PosPageState extends State<PosPage> {
         
         const VerticalDivider(width: 1),
 
+        // ================= KANAN: DETAIL KERANJANG =================
         Expanded(
           flex: 1,
           child: Container(
@@ -312,7 +435,7 @@ class _PosPageState extends State<PosPage> {
                         height: 50,
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
-                          onPressed: _total > 0 ? () {} : null,
+                          onPressed: _total > 0 ? _showPaymentDialog : null,
                           child: const Text('BAYAR SEKARANG', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                         ),
                       ),

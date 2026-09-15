@@ -251,32 +251,52 @@ class _MainNavigationState extends State<MainNavigation> {
 
   @override
   Widget build(BuildContext context) {
+    // Cek apakah halaman yang aktif adalah POS
+    int posIndex = _navItems.indexWhere((item) => item.label == 'POS');
+    bool isPosPage = _selectedIndex == posIndex;
+
     return Scaffold(
       appBar: AppBar(
-        title: Text('Warung Makan - ${widget.user['usr_name']}'),
+        toolbarHeight: 45, // Perkecil ukuran AppBar
+        centerTitle: true,
+        title: const Text(
+          'POS Warung Makan', 
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)
+        ),
         backgroundColor: Colors.blue,
         foregroundColor: Colors.white,
         actions: [
           IconButton(
-            tooltip: 'Keluar Aplikasi',
-            icon: const Icon(Icons.logout),
-            onPressed: _showLogoutDialog, // Memanggil dialog konfirmasi
+            // Ikon silang jika di POS, ikon logout jika di Home
+            icon: Icon(_selectedIndex == 0 ? Icons.logout : Icons.close),
+            onPressed: () {
+              if (_selectedIndex == 0) {
+                _showLogoutDialog();
+              } else {
+                setState(() {
+                  _selectedIndex = 0; // Kembali ke Home
+                });
+              }
+            },
           )
         ],
       ),
       body: _pages[_selectedIndex],
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _selectedIndex,
-        type: BottomNavigationBarType.fixed, // Agar menu tidak bergeser jika banyak
-        selectedItemColor: Colors.blue,
-        unselectedItemColor: Colors.grey,
-        onTap: (index) {
-          setState(() {
-            _selectedIndex = index;
-          });
-        },
-        items: _navItems,
-      ),
+      // Sembunyikan navbar jika sedang di menu POS agar lebih luas
+      bottomNavigationBar: isPosPage 
+        ? null 
+        : BottomNavigationBar(
+            currentIndex: _selectedIndex,
+            type: BottomNavigationBarType.fixed,
+            selectedItemColor: Colors.blue,
+            unselectedItemColor: Colors.grey,
+            onTap: (index) {
+              setState(() {
+                _selectedIndex = index;
+              });
+            },
+            items: _navItems,
+          ),
     );
   }
 }
