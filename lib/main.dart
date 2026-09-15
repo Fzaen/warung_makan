@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'database_helper.dart';
 import 'pages/admin/master_user_page.dart';
 import 'pages/admin/master_product_page.dart';
+import 'pages/admin/audit_log_page.dart';
 import 'pages/pos/pos_page.dart';
 import 'pages/home_page.dart';
 
@@ -216,6 +217,9 @@ class _MainNavigationState extends State<MainNavigation> {
       
       _pages.add(const MasterUserPage());
       _navItems.add(const BottomNavigationBarItem(icon: Icon(Icons.people), label: 'User'));
+
+      _pages.add(const AuditLogPage());
+      _navItems.add(const BottomNavigationBarItem(icon: Icon(Icons.history_edu), label: 'Audit Log'));
     }
   }
 

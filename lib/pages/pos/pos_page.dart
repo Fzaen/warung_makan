@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'dart:async';
 import '../../database_helper.dart';
@@ -67,18 +68,21 @@ class _PosPageState extends State<PosPage> {
       product['prd_sku'],
       1,
       product['prd_selling_price'],
-      product['prd_cost_price'], // Menambahkan harga modal
+      product['prd_cost_price'],
     );
     _refreshCart();
   }
 
   void _updateQty(int cartId, int newQty) async {
-    await DatabaseHelper.instance.updateCartQty(cartId, newQty);
+    // Tombol minus tidak boleh sampai menghapus (min 1)
+    if (newQty <= 0) return; 
+    
+    await DatabaseHelper.instance.updateCartQty(widget.user['usr_id'], cartId, newQty);
     _refreshCart();
   }
 
   void _deleteItem(int cartId) async {
-    await DatabaseHelper.instance.removeFromCart(cartId);
+    await DatabaseHelper.instance.removeFromCart(widget.user['usr_id'], cartId);
     _refreshCart();
   }
 
@@ -104,6 +108,7 @@ class _PosPageState extends State<PosPage> {
           controller: controller,
           keyboardType: TextInputType.number,
           autofocus: true,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
           decoration: const InputDecoration(labelText: 'Masukkan Jumlah'),
         ),
         actions: [
@@ -111,9 +116,13 @@ class _PosPageState extends State<PosPage> {
           ElevatedButton(
             onPressed: () {
               int? val = int.tryParse(controller.text);
-              if (val != null) {
+              if (val != null && val > 0) { // Proteksi tidak boleh 0 lewat popup juga
                 _updateQty(cartId, val);
                 Navigator.pop(context);
+              } else if (val == 0) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Gunakan tombol sampah untuk menghapus item'))
+                );
               }
             },
             child: const Text('SIMPAN'),
@@ -150,6 +159,10 @@ class _PosPageState extends State<PosPage> {
                     controller: paidController,
                     keyboardType: TextInputType.number,
                     autofocus: true,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                      CurrencyInputFormatter(),
+                    ],
                     style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                     decoration: const InputDecoration(
                       labelText: 'Uang Dibayar',
@@ -157,8 +170,9 @@ class _PosPageState extends State<PosPage> {
                       border: OutlineInputBorder(),
                     ),
                     onChanged: (value) {
+                      String cleanValue = value.replaceAll('.', '');
                       setModalState(() {
-                        paidAmount = double.tryParse(value) ?? 0;
+                        paidAmount = double.tryParse(cleanValue) ?? 0;
                       });
                     },
                   ),
@@ -179,7 +193,6 @@ class _PosPageState extends State<PosPage> {
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
                   onPressed: isEnough ? () async {
-                    // Pindah ke database
                     await DatabaseHelper.instance.processPayment(
                       userId: widget.user['usr_id'],
                       subtotal: _total,
@@ -188,12 +201,8 @@ class _PosPageState extends State<PosPage> {
                     );
                     
                     if (!mounted) return;
-                    Navigator.pop(context); // Tutup dialog bayar
-                    
-                    // Tampilkan sukses popup
+                    Navigator.pop(context);
                     _showSuccessDialog(change);
-                    
-                    // Refresh cart jadi kosong
                     _refreshCart();
                   } : null,
                   child: const Text('KONFIRMASI BAYAR'),
@@ -247,7 +256,6 @@ class _PosPageState extends State<PosPage> {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        // ================= KIRI: GALERI PRODUK =================
         Expanded(
           flex: 2,
           child: Column(
@@ -325,7 +333,6 @@ class _PosPageState extends State<PosPage> {
         
         const VerticalDivider(width: 1),
 
-        // ================= KANAN: DETAIL KERANJANG =================
         Expanded(
           flex: 1,
           child: Container(
@@ -373,8 +380,9 @@ class _PosPageState extends State<PosPage> {
                                       Row(
                                         children: [
                                           IconButton(
-                                            icon: const Icon(Icons.remove_circle_outline, color: Colors.orange),
-                                            onPressed: () => _updateQty(cartId, qty - 1),
+                                            icon: Icon(Icons.remove_circle_outline, 
+                                              color: qty > 1 ? Colors.orange : Colors.grey),
+                                            onPressed: qty > 1 ? () => _updateQty(cartId, qty - 1) : null,
                                           ),
                                           InkWell(
                                             onTap: () => _showManualQtyDialog(cartId, qty, item['prd_name']),
@@ -472,6 +480,23 @@ class _PosPageState extends State<PosPage> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class CurrencyInputFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
+    if (newValue.selection.baseOffset == 0) {
+      return newValue;
+    }
+    String cleanText = newValue.text.replaceAll('.', '');
+    double value = double.parse(cleanText);
+    final formatter = NumberFormat.decimalPattern('id_ID');
+    String newText = formatter.format(value);
+    return newValue.copyWith(
+      text: newText,
+      selection: TextSelection.collapsed(offset: newText.length),
     );
   }
 }

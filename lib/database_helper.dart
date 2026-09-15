@@ -37,6 +37,7 @@ class DatabaseHelper {
         final db = await openDatabase(path);
         final usersTable = await db.rawQuery("SELECT name FROM sqlite_master WHERE type='table' AND name='users'");
         final cartTable = await db.rawQuery("SELECT name FROM sqlite_master WHERE type='table' AND name='pos_cart'");
+        final logTable = await db.rawQuery("SELECT name FROM sqlite_master WHERE type='table' AND name='pos_logs'");
         
         // Cek kolom baru 'itm_cost_price' di sale_items
         final saleItemsInfo = await db.rawQuery("PRAGMA table_info(sale_items)");
@@ -44,7 +45,7 @@ class DatabaseHelper {
         
         await db.close();
         
-        if (usersTable.isEmpty || cartTable.isEmpty || !hasCostPrice) {
+        if (usersTable.isEmpty || cartTable.isEmpty || logTable.isEmpty || !hasCostPrice) {
           print("Skema database tidak lengkap atau versi lama. Menimpa dengan file assets...");
           shouldCopy = true;
         }
@@ -117,6 +118,48 @@ class DatabaseHelper {
   }
 
   // ==========================================
+  // FUNGSI LOGGING (POS LOGS)
+  // ==========================================
+  Future<List<Map<String, dynamic>>> getPosLogs({String? startDate, String? endDate}) async {
+    final db = await instance.database;
+    String whereClause = '';
+    List<dynamic> whereArgs = [];
+
+    if (startDate != null && endDate != null) {
+      whereClause = 'WHERE DATE(log_timestamp) BETWEEN DATE(?) AND DATE(?)';
+      whereArgs = [startDate, endDate];
+    }
+
+    return await db.rawQuery('''
+      SELECT l.*, u.usr_name, p.prd_name 
+      FROM pos_logs l
+      JOIN users u ON l.log_user_id = u.usr_id
+      JOIN products p ON l.log_prd_sku = p.prd_sku
+      $whereClause
+      ORDER BY l.log_timestamp DESC
+    ''', whereArgs);
+  }
+
+  Future<void> addPosLog({
+    required int userId,
+    required String prdSku,
+    required String action,
+    required int oldQty,
+    required int newQty,
+    String? description,
+  }) async {
+    final db = await instance.database;
+    await db.insert('pos_logs', {
+      'log_user_id': userId,
+      'log_prd_sku': prdSku,
+      'log_action': action,
+      'log_old_qty': oldQty,
+      'log_new_qty': newQty,
+      'log_description': description,
+    });
+  }
+
+  // ==========================================
   // FUNGSI POS CART (TEMPORARY SALES)
   // ==========================================
   
@@ -131,38 +174,53 @@ class DatabaseHelper {
 
     if (existing.isNotEmpty) {
       int newQty = (existing.first['cart_qty'] as int) + qty;
-      await updateCartQty(existing.first['cart_id'] as int, newQty);
+      await updateCartQty(userId, existing.first['cart_id'] as int, newQty);
     } else {
       await db.insert('pos_cart', {
         'cart_user_id': userId,
         'cart_prd_sku': prdSku,
         'cart_qty': qty,
         'cart_price': sellingPrice,
-        'cart_cost_price': costPrice, // Simpan harga modal
+        'cart_cost_price': costPrice,
         'cart_subtotal': qty * sellingPrice,
         'cart_status': 0
       });
     }
   }
 
-  Future<void> updateCartQty(int cartId, int newQty) async {
+  Future<void> updateCartQty(int userId, int cartId, int newQty) async {
     final db = await instance.database;
-    if (newQty <= 0) {
-      await removeFromCart(cartId);
-    } else {
-      final item = await db.query('pos_cart', where: 'cart_id = ?', whereArgs: [cartId]);
-      if (item.isNotEmpty) {
-        double price = item.first['cart_price'] as double;
-        await db.update(
-          'pos_cart',
-          {
-            'cart_qty': newQty,
-            'cart_subtotal': newQty * price
-          },
-          where: 'cart_id = ?',
-          whereArgs: [cartId],
+    
+    final item = await db.query('pos_cart', where: 'cart_id = ?', whereArgs: [cartId]);
+    if (item.isNotEmpty) {
+      int oldQty = item.first['cart_qty'] as int;
+      String sku = item.first['cart_prd_sku'] as String;
+      double price = item.first['cart_price'] as double;
+
+      // Proteksi: Tanda kurang (-) tidak boleh sampai 0 (menghapus)
+      if (newQty <= 0) return;
+
+      // Jika jumlah dikurangi, buat log
+      if (newQty < oldQty) {
+        await addPosLog(
+          userId: userId,
+          prdSku: sku,
+          action: 'REDUCE',
+          oldQty: oldQty,
+          newQty: newQty,
+          description: 'Pengurangan kuantitas di keranjang'
         );
       }
+
+      await db.update(
+        'pos_cart',
+        {
+          'cart_qty': newQty,
+          'cart_subtotal': newQty * price
+        },
+        where: 'cart_id = ?',
+        whereArgs: [cartId],
+      );
     }
   }
 
@@ -176,9 +234,26 @@ class DatabaseHelper {
     ''', [userId]);
   }
 
-  Future<void> removeFromCart(int cartId) async {
+  Future<void> removeFromCart(int userId, int cartId) async {
     final db = await instance.database;
-    await db.delete('pos_cart', where: 'cart_id = ?', whereArgs: [cartId]);
+    
+    final item = await db.query('pos_cart', where: 'cart_id = ?', whereArgs: [cartId]);
+    if (item.isNotEmpty) {
+      int oldQty = item.first['cart_qty'] as int;
+      String sku = item.first['cart_prd_sku'] as String;
+
+      // Buat log penghapusan
+      await addPosLog(
+        userId: userId,
+        prdSku: sku,
+        action: 'DELETE',
+        oldQty: oldQty,
+        newQty: 0,
+        description: 'Penghapusan item dari keranjang'
+      );
+
+      await db.delete('pos_cart', where: 'cart_id = ?', whereArgs: [cartId]);
+    }
   }
 
   // ==========================================
@@ -207,13 +282,9 @@ class DatabaseHelper {
     String invoiceNumber = 'INV-$datePart-${sequence.toString().padLeft(4, '0')}';
 
     await db.transaction((txn) async {
-      // Ambil item dari cart
       final cartItems = await txn.query('pos_cart', where: 'cart_user_id = ? AND cart_status = 0', whereArgs: [userId]);
-      
-      // Hitung total varian item (berapa baris produk yang berbeda)
       int totalVarian = cartItems.length;
 
-      // 1. Simpan ke tabel SALES
       await txn.insert('sales', {
         'sls_invoice_number': invoiceNumber,
         'sls_user_id': userId,
@@ -223,10 +294,9 @@ class DatabaseHelper {
         'sls_paid_amount': paidAmount,
         'sls_change_amount': changeAmount,
         'sls_payment_method': paymentMethod,
-        'sls_total_item': totalVarian, // Sekarang berisi jumlah jenis/varian produk
+        'sls_total_item': totalVarian,
       });
 
-      // 2. Pindahkan item ke sale_items
       for (var item in cartItems) {
         await txn.insert('sale_items', {
           'itm_sale_id': invoiceNumber,
@@ -235,12 +305,11 @@ class DatabaseHelper {
           'itm_cashback': 0,
           'itm_quantity': item['cart_qty'],
           'itm_unit_price': item['cart_price'],
-          'itm_cost_price': item['cart_cost_price'], // Simpan harga modal saat ini
+          'itm_cost_price': item['cart_cost_price'],
           'itm_subtotal': item['cart_subtotal'],
         });
       }
 
-      // 3. Update status pos_cart
       await txn.update(
         'pos_cart',
         {'cart_status': 1},
