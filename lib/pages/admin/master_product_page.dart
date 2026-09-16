@@ -1,6 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:file_picker/file_picker.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import '../../database_helper.dart';
 
@@ -94,9 +94,10 @@ class _MasterProductPageState extends State<MasterProductPage> {
                 children: [
                   GestureDetector(
                     onTap: () async {
-                      FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.image);
-                      if (result != null) {
-                        setModalState(() => newImageFile = File(result.files.single.path!));
+                      final ImagePicker picker = ImagePicker();
+                      final XFile? image = await picker.pickImage(source: ImageSource.gallery);
+                      if (image != null) {
+                        setModalState(() => newImageFile = File(image.path));
                       }
                     },
                     child: Container(
