@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'dart:io';
 import 'dart:async';
 import '../../database_helper.dart';
 
@@ -30,6 +31,28 @@ class _PosPageState extends State<PosPage> {
   void initState() {
     super.initState();
     _loadData();
+  }
+
+  // Helper widget untuk menampilkan gambar (dari local atau asset)
+  Widget _buildProductImage(String? fileName, {double size = 100}) {
+    if (fileName == null || fileName.isEmpty) {
+      return Icon(Icons.fastfood, size: size / 2, color: Colors.grey);
+    }
+
+    return FutureBuilder<File?>(
+      future: DatabaseHelper.instance.getLocalProductImage(fileName),
+      builder: (context, snapshot) {
+        if (snapshot.hasData && snapshot.data != null) {
+          return Image.file(snapshot.data!, fit: BoxFit.cover);
+        } else {
+          return Image.asset(
+            'assets/img/$fileName',
+            fit: BoxFit.cover,
+            errorBuilder: (c, e, s) => Icon(Icons.fastfood, size: size / 2, color: Colors.grey),
+          );
+        }
+      },
+    );
   }
 
   void _loadData() async {
@@ -296,14 +319,7 @@ class _PosPageState extends State<PosPage> {
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
                                   Expanded(
-                                    child: Image.asset(
-                                      'assets/img/${p['prd_image']}',
-                                      fit: BoxFit.cover,
-                                      errorBuilder: (c, e, s) => Container(
-                                        color: Colors.grey[200],
-                                        child: const Icon(Icons.broken_image, color: Colors.grey),
-                                      ),
-                                    ),
+                                    child: _buildProductImage(p['prd_image']),
                                   ),
                                   Padding(
                                     padding: const EdgeInsets.all(8.0),
@@ -314,6 +330,9 @@ class _PosPageState extends State<PosPage> {
                                           maxLines: 2, 
                                           overflow: TextOverflow.ellipsis,
                                           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                        const SizedBox(height: 2),
+                                        Text('[${p['prd_sku']}]', 
+                                          style: const TextStyle(fontSize: 10, color: Colors.blueGrey)),
                                         const SizedBox(height: 4),
                                         Text(_currencyFormat.format(p['prd_selling_price']), 
                                           style: const TextStyle(color: Colors.blue, fontSize: 12, fontWeight: FontWeight.bold)),

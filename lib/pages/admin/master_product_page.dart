@@ -1,13 +1,316 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:intl/intl.dart';
+import '../../database_helper.dart';
 
-class MasterProductPage extends StatelessWidget {
+class MasterProductPage extends StatefulWidget {
   const MasterProductPage({super.key});
+
+  @override
+  State<MasterProductPage> createState() => _MasterProductPageState();
+}
+
+class _MasterProductPageState extends State<MasterProductPage> {
+  List<Map<String, dynamic>> _products = [];
+  List<Map<String, dynamic>> _categories = [];
+  String? _filterCategory; // null = Semua
+  bool _isLoading = true;
+  final _currencyFormat = NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
+
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  Future<void> _loadData() async {
+    setState(() => _isLoading = true);
+    final prods = await DatabaseHelper.instance.getAllProducts(mainCategory: _filterCategory);
+    final cats = await DatabaseHelper.instance.getCategories();
+    setState(() {
+      _products = prods;
+      _categories = cats;
+      _isLoading = false;
+    });
+  }
+
+  Widget _buildProductImage(String? fileName, {double size = 50}) {
+    if (fileName == null || fileName.isEmpty) {
+      return Icon(Icons.fastfood, size: size, color: Colors.grey);
+    }
+
+    return FutureBuilder<File?>(
+      future: DatabaseHelper.instance.getLocalProductImage(fileName),
+      builder: (context, snapshot) {
+        if (snapshot.hasData && snapshot.data != null) {
+          return Image.file(snapshot.data!, width: size, height: size, fit: BoxFit.cover);
+        } else {
+          return Image.asset(
+            'assets/img/$fileName',
+            width: size,
+            height: size,
+            fit: BoxFit.cover,
+            errorBuilder: (c, e, s) => Icon(Icons.fastfood, size: size, color: Colors.grey),
+          );
+        }
+      },
+    );
+  }
+
+  void _showProductForm({Map<String, dynamic>? product}) {
+    final isEdit = product != null;
+    final skuController = TextEditingController(text: isEdit ? product['prd_sku'] : '');
+    final nameController = TextEditingController(text: isEdit ? product['prd_name'] : '');
+    final costPriceController = TextEditingController(text: isEdit ? product['prd_cost_price'].toString() : '');
+    final sellingPriceController = TextEditingController(text: isEdit ? product['prd_selling_price'].toString() : '');
+    final unitController = TextEditingController(text: isEdit ? product['prd_unit'] : 'pcs');
+    
+    // Logic untuk kategori terpisah
+    String? selectedMainCat = isEdit ? product['cat_name'] : null;
+    int? selectedSubCatId = isEdit ? product['prd_category_id'] : null;
+    
+    int isActive = isEdit ? (product['prd_is_active'] ?? 1) : 1;
+    String? currentImage = isEdit ? product['prd_image'] : null;
+    File? newImageFile;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) {
+          // Ambil daftar kategori utama yang unik
+          List<String> mainCats = _categories.map((c) => c['cat_name'] as String).toSet().toList();
+          
+          // Filter sub-kategori berdasarkan kategori utama yang dipilih
+          List<Map<String, dynamic>> subCats = selectedMainCat == null 
+            ? [] 
+            : _categories.where((c) => c['cat_name'] == selectedMainCat).toList();
+
+          return AlertDialog(
+            title: Text(isEdit ? 'Edit Produk' : 'Tambah Produk Baru'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  GestureDetector(
+                    onTap: () async {
+                      FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.image);
+                      if (result != null) {
+                        setModalState(() => newImageFile = File(result.files.single.path!));
+                      }
+                    },
+                    child: Container(
+                      height: 100,
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: Colors.grey[200],
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey[300]!),
+                      ),
+                      child: newImageFile != null 
+                        ? Image.file(newImageFile!, fit: BoxFit.cover)
+                        : (currentImage != null ? _buildProductImage(currentImage, size: 80) : const Icon(Icons.add_a_photo, color: Colors.grey)),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  
+                  // 1. Pilih Kategori Utama Dulu (Untuk generate SKU)
+                  DropdownButtonFormField<String>(
+                    value: selectedMainCat,
+                    decoration: const InputDecoration(labelText: 'Kategori Utama'),
+                    items: mainCats.map((cat) => DropdownMenuItem(value: cat, child: Text(cat))).toList(),
+                    onChanged: isEdit ? null : (val) async {
+                      if (val != null) {
+                        String nextSku = await DatabaseHelper.instance.generateNextSku(val);
+                        setModalState(() {
+                          selectedMainCat = val;
+                          selectedSubCatId = null; // Reset sub cat
+                          skuController.text = nextSku; // Auto fill SKU
+                        });
+                      }
+                    },
+                  ),
+                  
+                  // 2. Pilih Sub Kategori
+                  DropdownButtonFormField<int>(
+                    value: selectedSubCatId,
+                    decoration: const InputDecoration(labelText: 'Sub Kategori'),
+                    items: subCats.map((cat) => DropdownMenuItem<int>(
+                      value: cat['cat_id'], 
+                      child: Text(cat['cat_subname'] ?? '-')
+                    )).toList(),
+                    onChanged: (val) => setModalState(() => selectedSubCatId = val),
+                  ),
+
+                  TextField(
+                    controller: skuController,
+                    decoration: const InputDecoration(labelText: 'SKU (Otomatis)'),
+                    enabled: false, // Di-lock agar tidak manual
+                  ),
+                  TextField(
+                    controller: nameController,
+                    decoration: const InputDecoration(labelText: 'Nama Produk'),
+                  ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: costPriceController,
+                          decoration: const InputDecoration(labelText: 'Harga Modal'),
+                          keyboardType: TextInputType.number,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextField(
+                          controller: sellingPriceController,
+                          decoration: const InputDecoration(labelText: 'Harga Jual'),
+                          keyboardType: TextInputType.number,
+                        ),
+                      ),
+                    ],
+                  ),
+                  TextField(
+                    controller: unitController,
+                    decoration: const InputDecoration(labelText: 'Satuan'),
+                  ),
+                  const SizedBox(height: 10),
+                  SwitchListTile(
+                    title: const Text('Status Aktif'),
+                    value: isActive == 1,
+                    onChanged: (val) => setModalState(() => isActive = val ? 1 : 0),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('BATAL')),
+              ElevatedButton(
+                onPressed: (selectedSubCatId == null || skuController.text.isEmpty) ? null : () async {
+                  String? finalImage = currentImage;
+                  if (newImageFile != null) {
+                    finalImage = await DatabaseHelper.instance.saveProductImage(newImageFile!);
+                  }
+
+                  final productData = {
+                    'prd_sku': skuController.text,
+                    'prd_category_id': selectedSubCatId,
+                    'prd_name': nameController.text,
+                    'prd_cost_price': double.tryParse(costPriceController.text) ?? 0,
+                    'prd_selling_price': double.tryParse(sellingPriceController.text) ?? 0,
+                    'prd_unit': unitController.text,
+                    'prd_image': finalImage,
+                    'prd_is_active': isActive,
+                  };
+
+                  if (isEdit) {
+                    await DatabaseHelper.instance.updateProduct(product['prd_sku'], productData);
+                  } else {
+                    await DatabaseHelper.instance.addProduct(productData);
+                  }
+                  
+                  if (!mounted) return;
+                  Navigator.pop(context);
+                  _loadData();
+                },
+                child: const Text('SIMPAN'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Master Product')),
-      body: const Center(child: Text('Master Product Page - Admin Only')),
+      appBar: AppBar(
+        toolbarHeight: 50,
+        backgroundColor: Colors.white,
+        elevation: 0,
+        title: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              _buildFilterChip(null, 'Semua'),
+              const SizedBox(width: 8),
+              _buildFilterChip('Makanan', 'Makanan'),
+              const SizedBox(width: 8),
+              _buildFilterChip('Minuman', 'Minuman'),
+              const SizedBox(width: 8),
+              _buildFilterChip('Cemilan', 'Cemilan'),
+            ],
+          ),
+        ),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _showProductForm(),
+        child: const Icon(Icons.add),
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _products.isEmpty
+              ? const Center(child: Text('Belum ada data produk.'))
+              : ListView.builder(
+                  padding: const EdgeInsets.all(10),
+                  itemCount: _products.length,
+                  itemBuilder: (context, index) {
+                    final p = _products[index];
+                    final bool isActive = (p['prd_is_active'] ?? 1) == 1;
+                    
+                    return Card(
+                      child: ListTile(
+                        leading: ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: _buildProductImage(p['prd_image']),
+                        ),
+                        title: Text(p['prd_name'], style: const TextStyle(fontWeight: FontWeight.bold)),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('SKU: ${p['prd_sku']} | ${p['cat_name']} (${p['cat_subname']})', 
+                              style: const TextStyle(fontSize: 11, color: Colors.blueGrey)),
+                            Text('Jual: ${_currencyFormat.format(p['prd_selling_price'])}',
+                              style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
+                          ],
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: isActive ? Colors.green[50] : Colors.red[50],
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text(isActive ? 'AKTIF' : 'NON-AKTIF',
+                                style: TextStyle(fontSize: 10, color: isActive ? Colors.green : Colors.red, fontWeight: FontWeight.bold)),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.edit, color: Colors.blue),
+                              onPressed: () => _showProductForm(product: p),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+    );
+  }
+
+  Widget _buildFilterChip(String? category, String label) {
+    bool isSelected = _filterCategory == category;
+    return ChoiceChip(
+      label: Text(label),
+      selected: isSelected,
+      onSelected: (selected) {
+        setState(() {
+          _filterCategory = selected ? category : null;
+        });
+        _loadData();
+      },
     );
   }
 }

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
@@ -35,18 +36,18 @@ class DatabaseHelper {
       // 2. Cek apakah tabel dan kolom lengkap
       try {
         final db = await openDatabase(path);
-        final usersTable = await db.rawQuery("SELECT name FROM sqlite_master WHERE type='table' AND name='users'");
-        final cartTable = await db.rawQuery("SELECT name FROM sqlite_master WHERE type='table' AND name='pos_cart'");
-        final logTable = await db.rawQuery("SELECT name FROM sqlite_master WHERE type='table' AND name='pos_logs'");
         
-        // Cek kolom baru 'itm_cost_price' di sale_items
-        final saleItemsInfo = await db.rawQuery("PRAGMA table_info(sale_items)");
-        bool hasCostPrice = saleItemsInfo.any((col) => col['name'] == 'itm_cost_price');
+        // Cek kolom baru 'prd_is_active' di products
+        final productsInfo = await db.rawQuery("PRAGMA table_info(products)");
+        bool hasPrdActive = productsInfo.any((col) => col['name'] == 'prd_is_active');
+        
+        // Cek tabel log
+        final logTable = await db.rawQuery("SELECT name FROM sqlite_master WHERE type='table' AND name='pos_logs'");
         
         await db.close();
         
-        if (usersTable.isEmpty || cartTable.isEmpty || logTable.isEmpty || !hasCostPrice) {
-          print("Skema database tidak lengkap atau versi lama. Menimpa dengan file assets...");
+        if (logTable.isEmpty || !hasPrdActive) {
+          print("Skema database versi lama atau tidak lengkap. Menimpa dengan file assets...");
           shouldCopy = true;
         }
       } catch (e) {
@@ -56,10 +57,14 @@ class DatabaseHelper {
     }
 
     if (shouldCopy) {
-      if (exists) {
-        await File(path).delete();
+      try {
+        if (exists) {
+          await File(path).delete();
+        }
+        await _copyDatabaseFromAssets(path, filePath);
+      } catch (e) {
+        print("Gagal memperbarui database: $e");
       }
-      await _copyDatabaseFromAssets(path, filePath);
     }
 
     return await openDatabase(path, version: 1);
@@ -79,25 +84,127 @@ class DatabaseHelper {
   }
 
   // ==========================================
-  // FUNGSI MASTER DATA
+  // FUNGSI MASTER DATA & CRUD
   // ==========================================
   
+  // ROLES
+  Future<List<Map<String, dynamic>>> getRoles() async {
+    final db = await instance.database;
+    return await db.query('roles');
+  }
+
+  // CATEGORIES
+  Future<List<Map<String, dynamic>>> getCategories() async {
+    final db = await instance.database;
+    return await db.query('categories');
+  }
+
   Future<List<String>> getMainCategories() async {
     final db = await instance.database;
     final result = await db.rawQuery('SELECT DISTINCT cat_name FROM categories');
     return result.map((row) => row['cat_name'] as String).toList();
   }
 
+  // USERS
+  Future<List<Map<String, dynamic>>> getAllUsers() async {
+    final db = await instance.database;
+    return await db.rawQuery('''
+      SELECT u.*, r.rol_name 
+      FROM users u
+      JOIN roles r ON u.usr_role_id = r.rol_id
+      ORDER BY u.usr_name ASC
+    ''');
+  }
+
+  Future<int> addUser(Map<String, dynamic> user) async {
+    final db = await instance.database;
+    return await db.insert('users', user);
+  }
+
+  Future<int> updateUser(int id, Map<String, dynamic> user) async {
+    final db = await instance.database;
+    return await db.update('users', user, where: 'usr_id = ?', whereArgs: [id]);
+  }
+
+  // PRODUCTS
+  Future<List<Map<String, dynamic>>> getAllProducts({String? mainCategory}) async {
+    final db = await instance.database;
+    String whereClause = '';
+    List<dynamic> whereArgs = [];
+
+    if (mainCategory != null) {
+      whereClause = 'WHERE c.cat_name = ?';
+      whereArgs = [mainCategory];
+    }
+
+    return await db.rawQuery('''
+      SELECT p.*, c.cat_name, c.cat_subname 
+      FROM products p
+      JOIN categories c ON p.prd_category_id = c.cat_id
+      $whereClause
+      ORDER BY p.prd_sku ASC
+    ''', whereArgs);
+  }
+
+  Future<String> generateNextSku(String mainCategory) async {
+    final db = await instance.database;
+    String prefix = '1'; // Default Makanan
+    if (mainCategory == 'Minuman') prefix = '2';
+    if (mainCategory == 'Cemilan') prefix = '3';
+
+    final result = await db.rawQuery('''
+      SELECT MAX(prd_sku) as last_sku FROM products 
+      WHERE prd_sku LIKE '$prefix%' AND length(prd_sku) = 5
+    ''');
+
+    if (result.isNotEmpty && result.first['last_sku'] != null) {
+      int lastNum = int.parse(result.first['last_sku'] as String);
+      return (lastNum + 1).toString();
+    } else {
+      return '${prefix}0001';
+    }
+  }
+
   Future<List<Map<String, dynamic>>> getProductsByMainCategory(String? mainCategory) async {
     final db = await instance.database;
+    // Hanya ambil produk yang aktif (prd_is_active = 1) untuk POS
     if (mainCategory == null) {
-      return await db.query('products');
+      return await db.query('products', where: 'prd_is_active = 1', orderBy: 'prd_sku ASC');
     }
     return await db.rawQuery('''
       SELECT p.* FROM products p
       JOIN categories c ON p.prd_category_id = c.cat_id
-      WHERE c.cat_name = ?
+      WHERE c.cat_name = ? AND p.prd_is_active = 1
+      ORDER BY p.prd_sku ASC
     ''', [mainCategory]);
+  }
+
+  Future<int> addProduct(Map<String, dynamic> product) async {
+    final db = await instance.database;
+    return await db.insert('products', product);
+  }
+
+  Future<int> updateProduct(String sku, Map<String, dynamic> product) async {
+    final db = await instance.database;
+    return await db.update('products', product, where: 'prd_sku = ?', whereArgs: [sku]);
+  }
+
+  // IMAGE HANDLING
+  Future<String> saveProductImage(File imageFile) async {
+    final directory = await getApplicationDocumentsDirectory();
+    final path = join(directory.path, 'product_images');
+    await Directory(path).create(recursive: true);
+    
+    final fileName = '${DateTime.now().millisecondsSinceEpoch}${extension(imageFile.path)}';
+    final savedFile = await imageFile.copy(join(path, fileName));
+    return fileName; // Simpan hanya nama filenya
+  }
+
+  Future<File?> getLocalProductImage(String fileName) async {
+    final directory = await getApplicationDocumentsDirectory();
+    final file = File(join(directory.path, 'product_images', fileName));
+    if (await file.exists()) return file;
+    return null;
   }
 
   // ==========================================
@@ -197,10 +304,8 @@ class DatabaseHelper {
       String sku = item.first['cart_prd_sku'] as String;
       double price = item.first['cart_price'] as double;
 
-      // Proteksi: Tanda kurang (-) tidak boleh sampai 0 (menghapus)
       if (newQty <= 0) return;
 
-      // Jika jumlah dikurangi, buat log
       if (newQty < oldQty) {
         await addPosLog(
           userId: userId,
@@ -242,7 +347,6 @@ class DatabaseHelper {
       int oldQty = item.first['cart_qty'] as int;
       String sku = item.first['cart_prd_sku'] as String;
 
-      // Buat log penghapusan
       await addPosLog(
         userId: userId,
         prdSku: sku,
@@ -319,6 +423,30 @@ class DatabaseHelper {
     });
 
     return invoiceNumber;
+  }
+
+  // ==========================================
+  // FUNGSI STATISTIK (HOME)
+  // ==========================================
+  
+  Future<Map<String, dynamic>> getTodayStats() async {
+    final db = await instance.database;
+    String today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+
+    final countResult = await db.rawQuery(
+      "SELECT COUNT(*) as total FROM sales WHERE DATE(sls_transaction_date) = ?", 
+      [today]
+    );
+
+    final sumResult = await db.rawQuery(
+      "SELECT SUM(sls_grand_total) as omzet FROM sales WHERE DATE(sls_transaction_date) = ?", 
+      [today]
+    );
+
+    return {
+      'count': countResult.first['total'] ?? 0,
+      'omzet': sumResult.first['omzet'] ?? 0.0,
+    };
   }
 
   Future close() async {

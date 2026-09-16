@@ -201,7 +201,14 @@ class _MainNavigationState extends State<MainNavigation> {
     final roleId = widget.user['usr_role_id'];
 
     // Halaman Beranda (Home) tersedia untuk semua user
-    _pages = [HomePage(user: widget.user)];
+    _pages = [
+      HomePage(
+        user: widget.user, 
+        onNavigate: (index) {
+          setState(() => _selectedIndex = index);
+        },
+      )
+    ];
     _navItems = [
       const BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
     ];
