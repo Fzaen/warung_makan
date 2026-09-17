@@ -6,7 +6,8 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'database_helper.dart';
 import 'pages/admin/master_user_page.dart';
 import 'pages/admin/master_product_page.dart';
-import 'pages/admin/audit_log_page.dart';
+import 'pages/admin/report_hub_page.dart'; // Import Baru
+import 'pages/admin/settings_page.dart';
 import 'pages/pos/pos_page.dart';
 import 'pages/home_page.dart';
 
@@ -30,7 +31,7 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         useMaterial3: true,
-        scaffoldBackgroundColor: const Color(0xFFF8F9FA), // Latar belakang abu-abu sangat muda
+        scaffoldBackgroundColor: const Color(0xFFF8F9FA),
       ),
       home: const LoginView(),
     );
@@ -122,7 +123,7 @@ class _LoginViewState extends State<LoginView> {
 }
 
 /// ===========================================================================
-/// NAVIGASI UTAMA (DENGAN HEADER MINIMALIS)
+/// NAVIGASI UTAMA
 /// ===========================================================================
 class MainNavigation extends StatefulWidget {
   final Map<String, dynamic> user;
@@ -172,8 +173,13 @@ class _MainNavigationState extends State<MainNavigation> {
       _navItems.add(const BottomNavigationBarItem(icon: Icon(Icons.inventory_2_outlined, size: 20), activeIcon: Icon(Icons.inventory_2, size: 22), label: 'Produk'));
       _pages.add(const MasterUserPage());
       _navItems.add(const BottomNavigationBarItem(icon: Icon(Icons.people_outline, size: 20), activeIcon: Icon(Icons.people, size: 22), label: 'User'));
-      _pages.add(const AuditLogPage());
-      _navItems.add(const BottomNavigationBarItem(icon: Icon(Icons.history_outlined, size: 20), activeIcon: Icon(Icons.history, size: 22), label: 'Audit'));
+      
+      // Menu Report Baru (Gabungan)
+      _pages.add(const ReportHubPage());
+      _navItems.add(const BottomNavigationBarItem(icon: Icon(Icons.assessment_outlined, size: 20), activeIcon: Icon(Icons.assessment, size: 22), label: 'Report'));
+      
+      _pages.add(const SettingsPage());
+      _navItems.add(const BottomNavigationBarItem(icon: Icon(Icons.settings_outlined, size: 20), activeIcon: Icon(Icons.settings, size: 22), label: 'Setting'));
     }
   }
 
@@ -204,7 +210,7 @@ class _MainNavigationState extends State<MainNavigation> {
 
     return Scaffold(
       appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(40), // Header super tipis
+        preferredSize: const Size.fromHeight(40),
         child: AppBar(
           elevation: 0.5,
           backgroundColor: Colors.white,
@@ -212,7 +218,7 @@ class _MainNavigationState extends State<MainNavigation> {
           automaticallyImplyLeading: false,
           title: Row(
             children: [
-              const Icon(Icons.circle, size: 8, color: Colors.green), // Indikator status online
+              const Icon(Icons.circle, size: 8, color: Colors.green),
               const SizedBox(width: 8),
               Text(
                 '${widget.user['usr_name'].toString().toUpperCase()}  |  $_currentTime',

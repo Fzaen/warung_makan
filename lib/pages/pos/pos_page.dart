@@ -3,7 +3,10 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'dart:io';
 import 'dart:async';
+import 'package:printing/printing.dart';
+import 'package:pdf/pdf.dart';
 import '../../database_helper.dart';
+import '../../print_service.dart';
 
 class PosPage extends StatefulWidget {
   final Map<String, dynamic> user;
@@ -21,12 +24,23 @@ class _PosPageState extends State<PosPage> {
   double _total = 0;
   bool _isLoading = true;
 
+  final TextEditingController _searchController = TextEditingController();
+  final PrintService _printService = PrintService();
+  Timer? _debounce;
+
   final _currencyFormat = NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
 
   @override
   void initState() {
     super.initState();
     _loadData();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _debounce?.cancel();
+    super.dispose();
   }
 
   Widget _buildProductImage(String? fileName, {double size = 100}) {
@@ -59,14 +73,20 @@ class _PosPageState extends State<PosPage> {
     }
   }
 
-  void _filterByMainCategory(String? mainCat) async {
+  void _onSearchChanged(String query) {
+    if (_debounce?.isActive ?? false) _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 500), () => _filterProducts());
+  }
+
+  void _filterProducts() async {
     setState(() => _isLoading = true);
-    final prods = await DatabaseHelper.instance.getProductsByMainCategory(mainCat);
-    setState(() {
-      _selectedMainCategory = mainCat;
-      _products = prods;
-      _isLoading = false;
-    });
+    final prods = await DatabaseHelper.instance.getProductsByMainCategory(_selectedMainCategory, query: _searchController.text);
+    setState(() { _products = prods; _isLoading = false; });
+  }
+
+  void _filterByMainCategory(String? mainCat) {
+    setState(() => _selectedMainCategory = mainCat);
+    _filterProducts();
   }
 
   void _addToCart(Map<String, dynamic> product) async {
@@ -87,10 +107,7 @@ class _PosPageState extends State<PosPage> {
 
   void _refreshCart() async {
     final cart = await DatabaseHelper.instance.getActiveCart(widget.user['usr_id']);
-    setState(() {
-      _cartItems = cart;
-      _calculateTotal();
-    });
+    setState(() { _cartItems = cart; _calculateTotal(); });
   }
 
   void _calculateTotal() => _total = _cartItems.fold(0, (sum, item) => sum + (item['cart_subtotal'] ?? 0));
@@ -152,8 +169,10 @@ class _PosPageState extends State<PosPage> {
             actions: [
               TextButton(onPressed: () => Navigator.pop(context), child: const Text('BATAL')),
               ElevatedButton(onPressed: isEnough ? () async {
-                await DatabaseHelper.instance.processPayment(userId: widget.user['usr_id'], subtotal: _total, paidAmount: paidAmount, changeAmount: change);
-                Navigator.pop(context); _showSuccessDialog(change); _refreshCart();
+                String invoice = await DatabaseHelper.instance.processPayment(userId: widget.user['usr_id'], subtotal: _total, paidAmount: paidAmount, changeAmount: change);
+                Navigator.pop(context); 
+                _showSuccessDialog(change, invoice); 
+                _refreshCart();
               } : null, child: const Text('KONFIRMASI')),
             ],
           );
@@ -162,16 +181,88 @@ class _PosPageState extends State<PosPage> {
     );
   }
 
-  void _showSuccessDialog(double change) {
-    Timer? timer;
-    showDialog(context: context, builder: (context) {
-      timer = Timer(const Duration(seconds: 2), () => Navigator.canPop(context) ? Navigator.pop(context) : null);
-      return AlertDialog(
+  void _showSuccessDialog(double change, String invoiceNumber) {
+    showDialog(
+      context: context, 
+      barrierDismissible: true,
+      builder: (context) => AlertDialog(
         icon: const Icon(Icons.check_circle, color: Colors.green, size: 50),
         title: const Text('Berhasil!'),
-        content: change > 0 ? Text('Kembalian: ${_currencyFormat.format(change)}', textAlign: TextAlign.center) : null,
-      );
-    }).then((_) => timer?.cancel());
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (change > 0) Text('Kembalian: ${_currencyFormat.format(change)}', textAlign: TextAlign.center),
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _buildActionBtn(Icons.print, 'CETAK', Colors.blue, () => _handlePrintAction(invoiceNumber, 'direct')),
+                _buildActionBtn(Icons.visibility, 'LIHAT', Colors.orange, () => _handlePrintAction(invoiceNumber, 'view')),
+                _buildActionBtn(Icons.share, 'SHARE', Colors.green, () => _handlePrintAction(invoiceNumber, 'share')),
+              ],
+            ),
+          ],
+        ),
+        actions: [Center(child: TextButton(onPressed: () => Navigator.pop(context), child: const Text('TUTUP')))],
+      )
+    );
+  }
+
+  Widget _buildActionBtn(IconData icon, String label, Color color, VoidCallback onTap) {
+    return Column(
+      children: [
+        IconButton(
+          onPressed: onTap,
+          icon: Icon(icon, color: color),
+          style: IconButton.styleFrom(backgroundColor: color.withOpacity(0.1)),
+        ),
+        Text(label, style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.bold)),
+      ],
+    );
+  }
+
+  void _handlePrintAction(String invoiceNumber, String action) async {
+    final data = await DatabaseHelper.instance.getSaleByInvoice(invoiceNumber);
+    if (data != null) {
+      final sale = data['sale'];
+      final items = List<Map<String, dynamic>>.from(data['items']);
+      
+      if (action == 'direct') {
+        await _printService.printDirect(saleData: sale, items: items);
+      } else if (action == 'view') {
+        _showReceiptPreview(sale, items);
+      } else if (action == 'share') {
+        await _printService.shareReceipt(saleData: sale, items: items);
+      }
+    }
+  }
+
+  void _showReceiptPreview(Map<String, dynamic> sale, List<Map<String, dynamic>> items) async {
+    final settings = await DatabaseHelper.instance.getSettings();
+    final doc = await _printService.generatePdfDoc(saleData: sale, items: items, settings: settings);
+    
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (context) => Scaffold(
+        appBar: AppBar(
+          title: const Text('Pratinjau Struk', style: TextStyle(fontSize: 16)),
+          backgroundColor: Colors.white,
+          foregroundColor: Colors.black,
+          elevation: 0.5,
+          actions: [
+            IconButton(icon: const Icon(Icons.share), onPressed: () => _printService.shareReceipt(saleData: sale, items: items)),
+          ],
+        ),
+        body: PdfPreview(
+          build: (format) => doc.save(),
+          allowPrinting: true,
+          allowSharing: false, // Sudah ada di AppBar
+          canChangePageFormat: false,
+          initialPageFormat: const PdfPageFormat(72 * PdfPageFormat.mm, double.infinity),
+        ),
+      ),
+    );
   }
 
   @override
@@ -187,20 +278,48 @@ class _PosPageState extends State<PosPage> {
 
     return Column(
       children: [
-        // FILTER KATEGORI
         Container(
           width: double.infinity,
-          height: 50,
           color: Colors.white,
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Column(
             children: [
-              const SizedBox(width: 8),
-              _buildCategoryButton(null, 'Semua'),
-              ..._mainCategories.map((catName) => _buildCategoryButton(catName, catName)),
-              const SizedBox(width: 8),
+              SizedBox(
+                height: 45,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  physics: const BouncingScrollPhysics(),
+                  children: [
+                    const SizedBox(width: 8),
+                    _buildCategoryButton(null, 'Semua'),
+                    ..._mainCategories.map((catName) => _buildCategoryButton(catName, catName)),
+                    const SizedBox(width: 8),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
+                child: SizedBox(
+                  height: 35,
+                  child: TextField(
+                    controller: _searchController,
+                    onChanged: _onSearchChanged,
+                    style: const TextStyle(fontSize: 12),
+                    decoration: InputDecoration(
+                      hintText: 'Cari produk...',
+                      prefixIcon: const Icon(Icons.search, size: 16),
+                      suffixIcon: _searchController.text.isNotEmpty 
+                        ? IconButton(icon: const Icon(Icons.clear, size: 16), onPressed: () { _searchController.clear(); _filterProducts(); }) 
+                        : null,
+                      contentPadding: EdgeInsets.zero,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: BorderSide(color: Colors.grey[300]!)),
+                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: BorderSide(color: Colors.grey[300]!)),
+                      filled: true,
+                      fillColor: Colors.grey[50],
+                    ),
+                  ),
+                ),
+              ),
             ],
           ),
         ),
@@ -208,7 +327,6 @@ class _PosPageState extends State<PosPage> {
         Expanded(
           child: Row(
             children: [
-              // ================= KIRI: GALERI PRODUK =================
               Expanded(
                 flex: (isMobile && isPortrait) ? 1 : 2,
                 child: _isLoading ? const Center(child: CircularProgressIndicator()) : GridView.builder(
@@ -250,7 +368,6 @@ class _PosPageState extends State<PosPage> {
                 ),
               ),
               const VerticalDivider(width: 1),
-              // ================= KANAN: DETAIL KERANJANG =================
               Expanded(
                 flex: (isMobile && isPortrait) ? 1 : 1, 
                 child: Container(
@@ -277,11 +394,9 @@ class _PosPageState extends State<PosPage> {
                                     ],
                                   ),
                                   const SizedBox(height: 8),
-                                  // Menggunakan Row dengan MainAxisAlignment.spaceBetween agar harga ke kanan
                                   Row(
                                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                     children: [
-                                      // Kontrol Qty
                                       Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
@@ -293,7 +408,6 @@ class _PosPageState extends State<PosPage> {
                                           IconButton(padding: EdgeInsets.zero, constraints: const BoxConstraints(), icon: const Icon(Icons.add_circle_outline, color: Colors.green, size: 24), onPressed: () => _updateQty(item['cart_id'], item['cart_qty'] + 1)),
                                         ],
                                       ),
-                                      // Harga Subtotal - Sekarang dipaksa ke sisi kanan
                                       Flexible(
                                         child: FittedBox(
                                           fit: BoxFit.scaleDown,

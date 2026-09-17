@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
@@ -16,6 +17,10 @@ class _MasterProductPageState extends State<MasterProductPage> {
   List<Map<String, dynamic>> _categories = [];
   String? _filterCategory;
   bool _isLoading = true;
+  
+  final TextEditingController _searchController = TextEditingController();
+  Timer? _debounce;
+
   final _currencyFormat = NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
 
   @override
@@ -24,14 +29,31 @@ class _MasterProductPageState extends State<MasterProductPage> {
     _loadData();
   }
 
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _debounce?.cancel();
+    super.dispose();
+  }
+
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
-    final prods = await DatabaseHelper.instance.getAllProducts(mainCategory: _filterCategory);
+    final prods = await DatabaseHelper.instance.getAllProducts(
+      mainCategory: _filterCategory,
+      query: _searchController.text
+    );
     final cats = await DatabaseHelper.instance.getCategories();
     setState(() {
       _products = prods;
       _categories = cats;
       _isLoading = false;
+    });
+  }
+
+  void _onSearchChanged(String query) {
+    if (_debounce?.isActive ?? false) _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 500), () {
+      _loadData();
     });
   }
 
@@ -103,22 +125,51 @@ class _MasterProductPageState extends State<MasterProductPage> {
 
     return Scaffold(
       appBar: AppBar(
-        toolbarHeight: isMobile ? 55 : 65,
+        toolbarHeight: isMobile ? 100 : 110, // Berikan ruang untuk search bar
         backgroundColor: Colors.white,
         elevation: 0,
-        title: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: [
-              _buildFilterChip(null, 'Semua'),
-              const SizedBox(width: 8),
-              _buildFilterChip('Makanan', 'Makanan'),
-              const SizedBox(width: 8),
-              _buildFilterChip('Minuman', 'Minuman'),
-              const SizedBox(width: 8),
-              _buildFilterChip('Cemilan', 'Cemilan'),
-            ],
-          ),
+        title: Column(
+          children: [
+            // Baris 1: Filter Chips
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _buildFilterChip(null, 'Semua'),
+                  const SizedBox(width: 8),
+                  _buildFilterChip('Makanan', 'Makanan'),
+                  const SizedBox(width: 8),
+                  _buildFilterChip('Minuman', 'Minuman'),
+                  const SizedBox(width: 8),
+                  _buildFilterChip('Cemilan', 'Cemilan'),
+                ],
+              ),
+            ),
+            // Baris 2: Search Bar Minimalis
+            Padding(
+              padding: const EdgeInsets.only(top: 8.0, bottom: 4.0),
+              child: SizedBox(
+                height: 35,
+                child: TextField(
+                  controller: _searchController,
+                  onChanged: _onSearchChanged,
+                  style: const TextStyle(fontSize: 12),
+                  decoration: InputDecoration(
+                    hintText: 'Cari produk atau SKU...',
+                    prefixIcon: const Icon(Icons.search, size: 16),
+                    suffixIcon: _searchController.text.isNotEmpty 
+                      ? IconButton(icon: const Icon(Icons.clear, size: 16), onPressed: () { _searchController.clear(); _loadData(); }) 
+                      : null,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 0),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: BorderSide(color: Colors.grey[300]!)),
+                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: BorderSide(color: Colors.grey[300]!)),
+                    filled: true,
+                    fillColor: Colors.grey[50],
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
       floatingActionButton: FloatingActionButton(onPressed: () => _showProductForm(), child: const Icon(Icons.add)),
@@ -150,7 +201,7 @@ class _MasterProductPageState extends State<MasterProductPage> {
 
   Widget _buildFilterChip(String? category, String label) {
     return ChoiceChip(
-      label: Text(label, style: const TextStyle(fontSize: 11)),
+      label: Text(label, style: const TextStyle(fontSize: 10)),
       selected: _filterCategory == category,
       onSelected: (selected) { setState(() => _filterCategory = selected ? category : null); _loadData(); },
     );
