@@ -112,7 +112,10 @@ class _ReprintPageState extends State<ReprintPage> {
                               height: 25,
                               child: ElevatedButton(
                                 onPressed: () => _handleReprint(s['sls_invoice_number']),
-                                style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 10), fontSize: 10),
+                                style: ElevatedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                                  textStyle: const TextStyle(fontSize: 10),
+                                ),
                                 child: const Text('REPRINT'),
                               ),
                             ),

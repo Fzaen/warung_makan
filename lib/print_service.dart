@@ -1,6 +1,8 @@
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:blue_thermal_printer/blue_thermal_printer.dart';
 import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -159,8 +161,15 @@ class PrintService {
     final doc = await generatePdfDoc(saleData: saleData, items: items, settings: settings);
     final pdfBytes = await doc.save();
 
+    // Simpan ke file fisik sementara (temporary file) agar bisa dibaca oleh aplikasi lain seperti WhatsApp
+    final tempDir = await getTemporaryDirectory();
+    final cleanInvoice = saleData['sls_invoice_number'].toString().replaceAll(RegExp(r'[^\w\-]'), '_');
+    final fileName = 'Struk-$cleanInvoice.pdf';
+    final tempFile = File('${tempDir.path}/$fileName');
+    await tempFile.writeAsBytes(pdfBytes);
+
     await Share.shareXFiles(
-      [XFile.fromData(pdfBytes, name: 'Struk-${saleData['sls_invoice_number']}.pdf', mimeType: 'application/pdf')],
+      [XFile(tempFile.path, name: fileName, mimeType: 'application/pdf')],
       text: 'Struk Belanja ${settings['set_warung_name']} - ${saleData['sls_invoice_number']}',
     );
   }

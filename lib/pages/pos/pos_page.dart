@@ -138,7 +138,12 @@ class _PosPageState extends State<PosPage> {
 
   void _showPaymentDialog() {
     final TextEditingController paidController = TextEditingController();
-    double paidAmount = 0;
+    final formatter = NumberFormat.decimalPattern('id_ID');
+    
+    // Tetap kosongkan input awal agar kasir bisa langsung mengetik jumlah uang non-pas
+    paidController.text = '';
+    double paidAmount = 0; 
+    
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -158,17 +163,30 @@ class _PosPageState extends State<PosPage> {
                   keyboardType: TextInputType.number,
                   autofocus: true,
                   inputFormatters: [FilteringTextInputFormatter.digitsOnly, CurrencyInputFormatter()],
-                  decoration: const InputDecoration(labelText: 'Uang Dibayar', prefixText: 'Rp ', border: OutlineInputBorder()),
+                  decoration: InputDecoration(
+                    labelText: 'Uang Dibayar', 
+                    prefixText: 'Rp ', 
+                    border: const OutlineInputBorder(),
+                    suffixIcon: TextButton(
+                      child: const Text('Uang Pas', style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold, fontSize: 12)),
+                      onPressed: () {
+                        setModalState(() {
+                          paidController.text = formatter.format(_total);
+                          paidAmount = _total;
+                        });
+                      },
+                    ),
+                  ),
                   onChanged: (value) => setModalState(() => paidAmount = double.tryParse(value.replaceAll('.', '')) ?? 0),
                 ),
                 const SizedBox(height: 12),
                 if (!isEnough && paidAmount > 0) Text('Kurang: ${_currencyFormat.format(_total - paidAmount)}', style: const TextStyle(color: Colors.red)),
-                if (isEnough) Text('Kembalian: ${_currencyFormat.format(change)}', style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
+                if (isEnough && paidAmount > 0) Text('Kembalian: ${_currencyFormat.format(change)}', style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
               ],
             ),
             actions: [
               TextButton(onPressed: () => Navigator.pop(context), child: const Text('BATAL')),
-              ElevatedButton(onPressed: isEnough ? () async {
+              ElevatedButton(onPressed: isEnough && paidAmount > 0 ? () async {
                 String invoice = await DatabaseHelper.instance.processPayment(userId: widget.user['usr_id'], subtotal: _total, paidAmount: paidAmount, changeAmount: change);
                 Navigator.pop(context); 
                 _showSuccessDialog(change, invoice); 
