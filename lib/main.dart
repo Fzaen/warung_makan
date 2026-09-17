@@ -1,4 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'dart:async';
+import 'dart:io';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'database_helper.dart';
 import 'pages/admin/master_user_page.dart';
 import 'pages/admin/master_product_page.dart';
@@ -6,19 +10,12 @@ import 'pages/admin/audit_log_page.dart';
 import 'pages/pos/pos_page.dart';
 import 'pages/home_page.dart';
 
-import 'dart:io';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart';
-
 void main() {
-  // Memastikan Flutter binding diinisialisasi
   WidgetsFlutterBinding.ensureInitialized();
-
-  // Inisialisasi khusus jika dijalankan di Windows atau Linux (Desktop)
   if (Platform.isWindows || Platform.isLinux) {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
   }
-
   runApp(const MyApp());
 }
 
@@ -33,8 +30,8 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         useMaterial3: true,
+        scaffoldBackgroundColor: const Color(0xFFF8F9FA), // Latar belakang abu-abu sangat muda
       ),
-      // Menetapkan Halaman Login sebagai layar utama saat aplikasi dibuka
       home: const LoginView(),
     );
   }
@@ -55,44 +52,28 @@ class _LoginViewState extends State<LoginView> {
   final TextEditingController _passwordController = TextEditingController();
   bool _isLoading = false;
 
-  // Fungsi untuk memvalidasi login ke database
   void _handleLogin() async {
     final username = _usernameController.text.trim();
     final password = _passwordController.text.trim();
 
     if (username.isEmpty || password.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Username dan Password tidak boleh kosong')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Isi username dan password')));
       return;
     }
 
     setState(() => _isLoading = true);
-
     try {
-      // Panggil fungsi login dari DatabaseHelper
       final user = await DatabaseHelper.instance.login(username, password);
-      
       if (user != null) {
         if (!mounted) return;
-        // Pindah ke halaman Navigasi Utama jika sukses
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (context) => MainNavigation(user: user),
-          ),
-        );
+        Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => MainNavigation(user: user)));
       } else {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Username atau Password salah!')),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Login Gagal!')));
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Terjadi kesalahan database: $e')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -101,70 +82,35 @@ class _LoginViewState extends State<LoginView> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[100],
       body: Center(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24.0),
+          padding: const EdgeInsets.all(32.0),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.restaurant_menu, size: 100, color: Colors.blue),
+              Image.asset('assets/logo/soto_banjar_kuin.png', width: 120, height: 120),
               const SizedBox(height: 16),
-              const Text(
-                'WARUNG MAKAN',
-                style: TextStyle(
-                  fontSize: 28, 
-                  fontWeight: FontWeight.bold, 
-                  color: Colors.blue
-                ),
-              ),
-              const SizedBox(height: 32),
-              Card(
-                elevation: 4,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                child: Padding(
-                  padding: const EdgeInsets.all(20.0),
-                  child: Column(
-                    children: [
-                      TextField(
-                        controller: _usernameController,
-                        decoration: const InputDecoration(
-                          labelText: 'Username',
-                          prefixIcon: Icon(Icons.person),
-                          border: OutlineInputBorder(),
-                        ),
+              const Text('WARUNG MAKAN', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, letterSpacing: 2, color: Colors.blue)),
+              const SizedBox(height: 40),
+              Container(
+                constraints: const BoxConstraints(maxWidth: 400),
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 20)]),
+                child: Column(
+                  children: [
+                    TextField(controller: _usernameController, decoration: const InputDecoration(labelText: 'Username', prefixIcon: Icon(Icons.person_outline))),
+                    const SizedBox(height: 16),
+                    TextField(controller: _passwordController, obscureText: true, decoration: const InputDecoration(labelText: 'Password', prefixIcon: Icon(Icons.lock_outline))),
+                    const SizedBox(height: 32),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 50,
+                      child: ElevatedButton(
+                        onPressed: _isLoading ? null : _handleLogin,
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                        child: _isLoading ? const CircularProgressIndicator(color: Colors.white) : const Text('MASUK', style: TextStyle(fontWeight: FontWeight.bold)),
                       ),
-                      const SizedBox(height: 16),
-                      TextField(
-                        controller: _passwordController,
-                        obscureText: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Password',
-                          prefixIcon: Icon(Icons.lock),
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                      SizedBox(
-                        width: double.infinity,
-                        height: 50,
-                        child: ElevatedButton(
-                          onPressed: _isLoading ? null : _handleLogin,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.blue,
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                          ),
-                          child: _isLoading
-                              ? const CircularProgressIndicator(color: Colors.white)
-                              : const Text(
-                                  'MASUK', 
-                                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)
-                                ),
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -176,10 +122,10 @@ class _LoginViewState extends State<LoginView> {
 }
 
 /// ===========================================================================
-/// NAVIGASI UTAMA (SETELAH LOGIN)
+/// NAVIGASI UTAMA (DENGAN HEADER MINIMALIS)
 /// ===========================================================================
 class MainNavigation extends StatefulWidget {
-  final Map<String, dynamic> user; // Data user dari database
+  final Map<String, dynamic> user;
   const MainNavigation({super.key, required this.user});
 
   @override
@@ -190,124 +136,121 @@ class _MainNavigationState extends State<MainNavigation> {
   int _selectedIndex = 0;
   late List<Widget> _pages;
   late List<BottomNavigationBarItem> _navItems;
+  String _currentTime = "";
+  Timer? _timer;
 
   @override
   void initState() {
     super.initState();
     _setupNavigation();
+    _updateTime();
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) => _updateTime());
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _updateTime() {
+    if (!mounted) return;
+    setState(() {
+      _currentTime = DateFormat('HH:mm:ss').format(DateTime.now());
+    });
   }
 
   void _setupNavigation() {
     final roleId = widget.user['usr_role_id'];
-
-    // Halaman Beranda (Home) tersedia untuk semua user
-    _pages = [
-      HomePage(
-        user: widget.user, 
-        onNavigate: (index) {
-          setState(() => _selectedIndex = index);
-        },
-      )
-    ];
-    _navItems = [
-      const BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
-    ];
-
-    // Menu POS (Point of Sale) tersedia untuk semua user
+    _pages = [HomePage(user: widget.user, onNavigate: (i) => setState(() => _selectedIndex = i))];
+    _navItems = [const BottomNavigationBarItem(icon: Icon(Icons.home_outlined, size: 20), activeIcon: Icon(Icons.home, size: 22), label: 'Home')];
     _pages.add(PosPage(user: widget.user));
-    _navItems.add(const BottomNavigationBarItem(icon: Icon(Icons.shopping_cart), label: 'POS'));
+    _navItems.add(const BottomNavigationBarItem(icon: Icon(Icons.shopping_cart_outlined, size: 20), activeIcon: Icon(Icons.shopping_cart, size: 22), label: 'POS'));
 
-    // Menu khusus Admin (Role ID 1)
     if (roleId == 1) {
       _pages.add(const MasterProductPage());
-      _navItems.add(const BottomNavigationBarItem(icon: Icon(Icons.inventory), label: 'Produk'));
-      
+      _navItems.add(const BottomNavigationBarItem(icon: Icon(Icons.inventory_2_outlined, size: 20), activeIcon: Icon(Icons.inventory_2, size: 22), label: 'Produk'));
       _pages.add(const MasterUserPage());
-      _navItems.add(const BottomNavigationBarItem(icon: Icon(Icons.people), label: 'User'));
-
+      _navItems.add(const BottomNavigationBarItem(icon: Icon(Icons.people_outline, size: 20), activeIcon: Icon(Icons.people, size: 22), label: 'User'));
       _pages.add(const AuditLogPage());
-      _navItems.add(const BottomNavigationBarItem(icon: Icon(Icons.history_edu), label: 'Audit Log'));
+      _navItems.add(const BottomNavigationBarItem(icon: Icon(Icons.history_outlined, size: 20), activeIcon: Icon(Icons.history, size: 22), label: 'Audit'));
     }
   }
 
-  // Fungsi untuk menampilkan dialog konfirmasi sebelum logout
   void _showLogoutDialog() {
     showDialog(
       context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Konfirmasi Keluar'),
-          content: const Text('Apakah Anda yakin ingin keluar dari aplikasi? Transaksi yang belum selesai mungkin akan hilang.'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context), // Menutup dialog saja
-              child: const Text('BATAL'),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-              onPressed: () {
-                Navigator.pop(context); // Tutup dialog
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (context) => const LoginView()),
-                );
-              },
-              child: const Text('KELUAR', style: TextStyle(color: Colors.white)),
-            ),
-          ],
-        );
-      },
+      builder: (context) => AlertDialog(
+        title: const Text('Keluar Aplikasi?'),
+        content: const Text('Anda akan dialihkan ke halaman login.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('BATAL')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            onPressed: () {
+              Navigator.pop(context);
+              Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const LoginView()));
+            },
+            child: const Text('KELUAR'),
+          ),
+        ],
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    // Cek apakah halaman yang aktif adalah POS
-    int posIndex = _navItems.indexWhere((item) => item.label == 'POS');
-    bool isPosPage = _selectedIndex == posIndex;
+    bool isPosPage = _navItems[_selectedIndex].label == 'POS';
 
     return Scaffold(
-      appBar: AppBar(
-        toolbarHeight: 45, // Perkecil ukuran AppBar
-        centerTitle: true,
-        title: const Text(
-          'POS Warung Makan', 
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(40), // Header super tipis
+        child: AppBar(
+          elevation: 0.5,
+          backgroundColor: Colors.white,
+          centerTitle: false,
+          automaticallyImplyLeading: false,
+          title: Row(
+            children: [
+              const Icon(Icons.circle, size: 8, color: Colors.green), // Indikator status online
+              const SizedBox(width: 8),
+              Text(
+                '${widget.user['usr_name'].toString().toUpperCase()}  |  $_currentTime',
+                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.blueGrey),
+              ),
+            ],
+          ),
+          actions: [
+            Container(
+              margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+              child: IconButton(
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                icon: Icon(_selectedIndex == 0 ? Icons.logout : Icons.close, size: 18, color: _selectedIndex == 0 ? Colors.red : Colors.grey),
+                onPressed: () {
+                  if (_selectedIndex == 0) _showLogoutDialog();
+                  else setState(() => _selectedIndex = 0);
+                },
+              ),
+            ),
+          ],
         ),
-        backgroundColor: Colors.blue,
-        foregroundColor: Colors.white,
-        actions: [
-          IconButton(
-            // Ikon silang jika di POS, ikon logout jika di Home
-            icon: Icon(_selectedIndex == 0 ? Icons.logout : Icons.close),
-            onPressed: () {
-              if (_selectedIndex == 0) {
-                _showLogoutDialog();
-              } else {
-                setState(() {
-                  _selectedIndex = 0; // Kembali ke Home
-                });
-              }
-            },
-          )
-        ],
       ),
       body: _pages[_selectedIndex],
-      // Sembunyikan navbar jika sedang di menu POS agar lebih luas
-      bottomNavigationBar: isPosPage 
-        ? null 
-        : BottomNavigationBar(
-            currentIndex: _selectedIndex,
-            type: BottomNavigationBarType.fixed,
-            selectedItemColor: Colors.blue,
-            unselectedItemColor: Colors.grey,
-            onTap: (index) {
-              setState(() {
-                _selectedIndex = index;
-              });
-            },
-            items: _navItems,
-          ),
+      bottomNavigationBar: isPosPage ? null : Container(
+        decoration: BoxDecoration(border: Border(top: BorderSide(color: Colors.grey[200]!, width: 1))),
+        child: BottomNavigationBar(
+          currentIndex: _selectedIndex,
+          type: BottomNavigationBarType.fixed,
+          backgroundColor: Colors.white,
+          selectedItemColor: Colors.blue,
+          unselectedItemColor: Colors.grey,
+          selectedFontSize: 10,
+          unselectedFontSize: 10,
+          onTap: (index) => setState(() => _selectedIndex = index),
+          items: _navItems,
+        ),
+      ),
     );
   }
 }
