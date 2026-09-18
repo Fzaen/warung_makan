@@ -19,6 +19,7 @@ class _SettingsPageState extends State<SettingsPage> {
   final TextEditingController _phoneController = TextEditingController();
   List<Printer> _availablePrinters = [];
   String? _selectedPrinterName;
+  int _selectedPaperSize = 80;
   bool _isLoading = true;
 
   @override
@@ -35,15 +36,14 @@ class _SettingsPageState extends State<SettingsPage> {
       _addressController.text = settings['set_address'] ?? '';
       _phoneController.text = settings['set_phone'] ?? '';
       _selectedPrinterName = settings['set_default_printer'];
+      _selectedPaperSize = settings['set_paper_size'] ?? 80;
       _isLoading = false;
     });
   }
 
   Future<void> _loadPrinters() async {
     final printers = await Printing.listPrinters();
-    setState(() {
-      _availablePrinters = printers;
-    });
+    setState(() { _availablePrinters = printers; });
   }
 
   Future<void> _saveSettings() async {
@@ -52,194 +52,95 @@ class _SettingsPageState extends State<SettingsPage> {
       'set_address': _addressController.text,
       'set_phone': _phoneController.text,
       'set_default_printer': _selectedPrinterName,
+      'set_paper_size': _selectedPaperSize,
     });
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Pengaturan berhasil disimpan')),
-    );
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pengaturan berhasil disimpan')));
   }
 
-  // FUNGSI BACKUP (Export ke File/Share)
   Future<void> _handleBackup() async {
     try {
       final dbPath = await DatabaseHelper.instance.getDatabasePath();
       final dbFile = File(dbPath);
-
       if (await dbFile.exists()) {
         final String timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
-        final String fileName = 'Backup_WarungMakan_$timestamp.db';
-
-        // Share file agar user bisa simpan ke WA, Drive, atau Folder lokal
-        await Share.shareXFiles(
-          [XFile(dbPath, name: fileName)],
-          text: 'Cadangan Database Warung Makan - $timestamp',
-        );
+        await Share.shareXFiles([XFile(dbPath, name: 'Backup_WarungMakan_$timestamp.db')], text: 'Cadangan Database');
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Gagal melakukan backup: $e')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Gagal backup: $e')));
     }
   }
 
-  // FUNGSI RESTORE (Import dari File)
   Future<void> _handleRestore() async {
     try {
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
-        type: FileType.any, // Database SQLite biasanya .db
-      );
-
+      FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.any);
       if (result != null && result.files.single.path != null) {
-        String path = result.files.single.path!;
-        
-        // Konfirmasi sebelum menimpa data
-        if (!mounted) return;
-        bool confirm = await showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('Pulihkan Data?'),
-            content: const Text('PERINGATAN: Semua data saat ini akan dihapus dan diganti dengan data dari file cadangan. Lanjutkan?'),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('BATAL')),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                onPressed: () => Navigator.pop(context, true), 
-                child: const Text('YA, PULIHKAN', style: TextStyle(color: Colors.white)),
-              ),
-            ],
-          ),
-        ) ?? false;
-
+        bool confirm = await showDialog(context: context, builder: (context) => AlertDialog(title: const Text('Pulihkan Data?'), content: const Text('Data saat ini akan ditimpa. Lanjutkan?'), actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('BATAL')), ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.red), onPressed: () => Navigator.pop(context, true), child: const Text('YA, PULIHKAN'))])) ?? false;
         if (confirm) {
           setState(() => _isLoading = true);
-          await DatabaseHelper.instance.restoreDatabase(path);
+          await DatabaseHelper.instance.restoreDatabase(result.files.single.path!);
           setState(() => _isLoading = false);
-          
           if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Data berhasil dipulihkan! Silakan restart aplikasi.')),
-          );
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Berhasil! Silakan restart aplikasi.')));
         }
       }
     } catch (e) {
       setState(() => _isLoading = false);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Gagal memulihkan data: $e')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Gagal restore: $e')));
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(20.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('INFORMASI WARUNG', 
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.blue)),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _nameController,
-                    decoration: const InputDecoration(
-                      labelText: 'Nama Warung',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.storefront),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _addressController,
-                    decoration: const InputDecoration(
-                      labelText: 'Alamat Lengkap',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.location_on_outlined),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _phoneController,
-                    decoration: const InputDecoration(
-                      labelText: 'No. Telp / WhatsApp',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.phone),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: _saveSettings,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                      child: const Text('SIMPAN INFORMASI'),
-                    ),
-                  ),
-                  
-                  const SizedBox(height: 32),
-                  const Text('PENGATURAN PRINTER', 
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.blue)),
-                  const SizedBox(height: 16),
-                  DropdownButtonFormField<String>(
-                    value: _availablePrinters.any((p) => p.name == _selectedPrinterName) 
-                      ? _selectedPrinterName 
-                      : null,
-                    decoration: const InputDecoration(
-                      labelText: 'Default Printer',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.print),
-                    ),
-                    items: _availablePrinters.map((printer) {
-                      return DropdownMenuItem<String>(
-                        value: printer.name,
-                        child: Text(printer.name, overflow: TextOverflow.ellipsis),
-                      );
-                    }).toList(),
-                    onChanged: (val) {
-                      setState(() => _selectedPrinterName = val);
-                      _saveSettings(); // Langsung simpan saat ganti printer
-                    },
-                  ),
-
-                  const SizedBox(height: 32),
-                  const Text('KEAMANAN DATA (BACKUP)', 
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.blue)),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _handleBackup,
-                          icon: const Icon(Icons.cloud_upload_outlined),
-                          label: const Text('BACKUP'),
-                          style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12)),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _handleRestore,
-                          icon: const Icon(Icons.cloud_download_outlined),
-                          label: const Text('RESTORE'),
-                          style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12)),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  const Text('* Backup akan mengirimkan file database ke WhatsApp/Email Anda sebagai cadangan.', 
-                    style: TextStyle(fontSize: 10, color: Colors.grey, fontStyle: FontStyle.italic)),
-                ],
-              ),
+      body: _isLoading ? const Center(child: CircularProgressIndicator()) : SingleChildScrollView(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('INFORMASI WARUNG', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.blue)),
+            const SizedBox(height: 12),
+            TextField(controller: _nameController, decoration: const InputDecoration(labelText: 'Nama Warung', border: OutlineInputBorder(), prefixIcon: Icon(Icons.storefront, size: 20))),
+            const SizedBox(height: 10),
+            TextField(controller: _addressController, decoration: const InputDecoration(labelText: 'Alamat', border: OutlineInputBorder(), prefixIcon: Icon(Icons.location_on_outlined, size: 20))),
+            const SizedBox(height: 10),
+            TextField(controller: _phoneController, decoration: const InputDecoration(labelText: 'No. Telp', border: OutlineInputBorder(), prefixIcon: Icon(Icons.phone, size: 20))),
+            const SizedBox(height: 24),
+            
+            const Text('PENGATURAN PRINTER', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.blue)),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              value: _availablePrinters.any((p) => p.name == _selectedPrinterName) ? _selectedPrinterName : null,
+              decoration: const InputDecoration(labelText: 'Pilih Printer', border: OutlineInputBorder(), prefixIcon: Icon(Icons.print, size: 20)),
+              items: _availablePrinters.map((p) => DropdownMenuItem(value: p.name, child: Text(p.name, style: const TextStyle(fontSize: 12)))).toList(),
+              onChanged: (val) => setState(() => _selectedPrinterName = val),
             ),
+            const SizedBox(height: 10),
+            DropdownButtonFormField<int>(
+              value: _selectedPaperSize,
+              decoration: const InputDecoration(labelText: 'Ukuran Kertas', border: OutlineInputBorder(), prefixIcon: Icon(Icons.straighten, size: 20)),
+              items: const [
+                DropdownMenuItem(value: 58, child: Text('58 mm (Kecil)')),
+                DropdownMenuItem(value: 80, child: Text('80 mm (Besar)')),
+              ],
+              onChanged: (val) => setState(() => _selectedPaperSize = val!),
+            ),
+            const SizedBox(height: 24),
+
+            const Text('KEAMANAN DATA', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.blue)),
+            const SizedBox(height: 12),
+            Row(children: [
+              Expanded(child: OutlinedButton.icon(onPressed: _handleBackup, icon: const Icon(Icons.cloud_upload, size: 18), label: const Text('BACKUP'))),
+              const SizedBox(width: 10),
+              Expanded(child: OutlinedButton.icon(onPressed: _handleRestore, icon: const Icon(Icons.cloud_download, size: 18), label: const Text('RESTORE'))),
+            ]),
+            const SizedBox(height: 32),
+            SizedBox(width: double.infinity, height: 45, child: ElevatedButton(onPressed: _saveSettings, style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))), child: const Text('SIMPAN SEMUA PENGATURAN'))),
+          ],
+        ),
+      ),
     );
   }
 }

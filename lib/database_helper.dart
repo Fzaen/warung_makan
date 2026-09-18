@@ -26,14 +26,12 @@ class DatabaseHelper {
 
     bool shouldCopy = false;
 
-    // 1. Cek apakah file fisik ada
     final exists = await File(path).exists();
 
     if (!exists) {
       print("File database tidak ada. Harus copy.");
       shouldCopy = true;
     } else {
-      // 2. Cek apakah tabel dan kolom lengkap
       try {
         final db = await openDatabase(path);
         
@@ -47,10 +45,14 @@ class DatabaseHelper {
         
         final saleItemsInfo = await db.rawQuery("PRAGMA table_info(sale_items)");
         bool hasCostPrice = saleItemsInfo.any((col) => col['name'] == 'itm_cost_price');
+
+        // Cek kolom baru 'set_paper_size'
+        final settingsInfo = await db.rawQuery("PRAGMA table_info(app_settings)");
+        bool hasPaperSize = settingsInfo.any((col) => col['name'] == 'set_paper_size');
         
         await db.close();
         
-        if (usersTable.isEmpty || cartTable.isEmpty || logTable.isEmpty || settingsTable.isEmpty || !hasPrdActive || !hasCostPrice) {
+        if (usersTable.isEmpty || cartTable.isEmpty || logTable.isEmpty || settingsTable.isEmpty || !hasPrdActive || !hasCostPrice || !hasPaperSize) {
           print("Skema database versi lama atau tidak lengkap. Menimpa dengan file assets...");
           shouldCopy = true;
         }
@@ -91,13 +93,11 @@ class DatabaseHelper {
   // FUNGSI MASTER DATA & CRUD
   // ==========================================
   
-  // ROLES
   Future<List<Map<String, dynamic>>> getRoles() async {
     final db = await instance.database;
     return await db.query('roles');
   }
 
-  // CATEGORIES
   Future<List<Map<String, dynamic>>> getCategories() async {
     final db = await instance.database;
     return await db.query('categories');
@@ -109,7 +109,6 @@ class DatabaseHelper {
     return result.map((row) => row['cat_name'] as String).toList();
   }
 
-  // USERS
   Future<List<Map<String, dynamic>>> getAllUsers() async {
     final db = await instance.database;
     return await db.rawQuery('''
@@ -130,26 +129,14 @@ class DatabaseHelper {
     return await db.update('users', user, where: 'usr_id = ?', whereArgs: [id]);
   }
 
-  // PRODUCTS
   Future<List<Map<String, dynamic>>> getAllProducts({String? mainCategory, String? query}) async {
     final db = await instance.database;
     String whereClause = '';
     List<dynamic> whereArgs = [];
-
     List<String> conditions = [];
-    if (mainCategory != null) {
-      conditions.add('c.cat_name = ?');
-      whereArgs.add(mainCategory);
-    }
-    if (query != null && query.isNotEmpty) {
-      conditions.add('(p.prd_name LIKE ? OR p.prd_sku LIKE ?)');
-      whereArgs.add('%$query%');
-      whereArgs.add('%$query%');
-    }
-
-    if (conditions.isNotEmpty) {
-      whereClause = 'WHERE ${conditions.join(' AND ')}';
-    }
+    if (mainCategory != null) { conditions.add('c.cat_name = ?'); whereArgs.add(mainCategory); }
+    if (query != null && query.isNotEmpty) { conditions.add('(p.prd_name LIKE ? OR p.prd_sku LIKE ?)'); whereArgs.add('%$query%'); whereArgs.add('%$query%'); }
+    if (conditions.isNotEmpty) { whereClause = 'WHERE ${conditions.join(' AND ')}'; }
 
     return await db.rawQuery('''
       SELECT p.*, c.cat_name, c.cat_subname 
@@ -165,12 +152,10 @@ class DatabaseHelper {
     String prefix = '1';
     if (mainCategory == 'Minuman') prefix = '2';
     if (mainCategory == 'Cemilan') prefix = '3';
-
     final result = await db.rawQuery('''
       SELECT MAX(prd_sku) as last_sku FROM products 
       WHERE prd_sku LIKE '$prefix%' AND length(prd_sku) = 5
     ''');
-
     if (result.isNotEmpty && result.first['last_sku'] != null) {
       int lastNum = int.parse(result.first['last_sku'] as String);
       return (lastNum + 1).toString();
@@ -183,17 +168,8 @@ class DatabaseHelper {
     final db = await instance.database;
     List<String> conditions = ['p.prd_is_active = 1'];
     List<dynamic> whereArgs = [];
-
-    if (mainCategory != null) {
-      conditions.add('c.cat_name = ?');
-      whereArgs.add(mainCategory);
-    }
-    if (query != null && query.isNotEmpty) {
-      conditions.add('(p.prd_name LIKE ? OR p.prd_sku LIKE ?)');
-      whereArgs.add('%$query%');
-      whereArgs.add('%$query%');
-    }
-
+    if (mainCategory != null) { conditions.add('c.cat_name = ?'); whereArgs.add(mainCategory); }
+    if (query != null && query.isNotEmpty) { conditions.add('(p.prd_name LIKE ? OR p.prd_sku LIKE ?)'); whereArgs.add('%$query%'); whereArgs.add('%$query%'); }
     return await db.rawQuery('''
       SELECT p.* FROM products p
       JOIN categories c ON p.prd_category_id = c.cat_id
@@ -212,7 +188,6 @@ class DatabaseHelper {
     return await db.update('products', product, where: 'prd_sku = ?', whereArgs: [sku]);
   }
 
-  // IMAGE HANDLING
   Future<String> saveProductImage(File imageFile) async {
     final directory = await getApplicationDocumentsDirectory();
     final path = join(directory.path, 'product_images');
@@ -241,6 +216,7 @@ class DatabaseHelper {
       'set_address': 'Jl. Raya Kuin No. 123',
       'set_phone': '0812-3456-7890',
       'set_default_printer': null,
+      'set_paper_size': 80, // Default 80mm
     };
   }
 
@@ -254,15 +230,8 @@ class DatabaseHelper {
   // ==========================================
   Future<Map<String, dynamic>?> login(String username, String password) async {
     final db = await instance.database;
-    final results = await db.query(
-      'users',
-      where: 'usr_username = ? AND usr_password = ? AND usr_is_active = 1',
-      whereArgs: [username, password],
-    );
-
-    if (results.isNotEmpty) {
-      return results.first;
-    }
+    final results = await db.query('users', where: 'usr_username = ? AND usr_password = ? AND usr_is_active = 1', whereArgs: [username, password]);
+    if (results.isNotEmpty) return results.first;
     return null;
   }
 
@@ -273,12 +242,7 @@ class DatabaseHelper {
     final db = await instance.database;
     String whereClause = '';
     List<dynamic> whereArgs = [];
-
-    if (startDate != null && endDate != null) {
-      whereClause = 'WHERE DATE(log_timestamp) BETWEEN DATE(?) AND DATE(?)';
-      whereArgs = [startDate, endDate];
-    }
-
+    if (startDate != null && endDate != null) { whereClause = 'WHERE DATE(log_timestamp) BETWEEN DATE(?) AND DATE(?)'; whereArgs = [startDate, endDate]; }
     return await db.rawQuery('''
       SELECT l.*, u.usr_name, p.prd_name 
       FROM pos_logs l
@@ -289,85 +253,36 @@ class DatabaseHelper {
     ''', whereArgs);
   }
 
-  Future<void> addPosLog({
-    required int userId,
-    required String prdSku,
-    required String action,
-    required int oldQty,
-    required int newQty,
-    String? description,
-  }) async {
+  Future<void> addPosLog({required int userId, required String prdSku, required String action, required int oldQty, required int newQty, String? description}) async {
     final db = await instance.database;
-    await db.insert('pos_logs', {
-      'log_user_id': userId,
-      'log_prd_sku': prdSku,
-      'log_action': action,
-      'log_old_qty': oldQty,
-      'log_new_qty': newQty,
-      'log_description': description,
-    });
+    await db.insert('pos_logs', { 'log_user_id': userId, 'log_prd_sku': prdSku, 'log_action': action, 'log_old_qty': oldQty, 'log_new_qty': newQty, 'log_description': description });
   }
 
   // ==========================================
-  // FUNGSI POS CART (TEMPORARY SALES)
+  // FUNGSI POS CART
   // ==========================================
   
   Future<void> addToCart(int userId, String prdSku, int qty, double sellingPrice, double costPrice) async {
     final db = await instance.database;
-    
-    final existing = await db.query(
-      'pos_cart',
-      where: 'cart_user_id = ? AND cart_prd_sku = ? AND cart_status = 0',
-      whereArgs: [userId, prdSku],
-    );
-
+    final existing = await db.query('pos_cart', where: 'cart_user_id = ? AND cart_prd_sku = ? AND cart_status = 0', whereArgs: [userId, prdSku]);
     if (existing.isNotEmpty) {
       int newQty = (existing.first['cart_qty'] as int) + qty;
       await updateCartQty(userId, existing.first['cart_id'] as int, newQty);
     } else {
-      await db.insert('pos_cart', {
-        'cart_user_id': userId,
-        'cart_prd_sku': prdSku,
-        'cart_qty': qty,
-        'cart_price': sellingPrice,
-        'cart_cost_price': costPrice,
-        'cart_subtotal': qty * sellingPrice,
-        'cart_status': 0
-      });
+      await db.insert('pos_cart', { 'cart_user_id': userId, 'cart_prd_sku': prdSku, 'cart_qty': qty, 'cart_price': sellingPrice, 'cart_cost_price': costPrice, 'cart_subtotal': qty * sellingPrice, 'cart_status': 0 });
     }
   }
 
   Future<void> updateCartQty(int userId, int cartId, int newQty) async {
     final db = await instance.database;
-    
     final item = await db.query('pos_cart', where: 'cart_id = ?', whereArgs: [cartId]);
     if (item.isNotEmpty) {
       int oldQty = item.first['cart_qty'] as int;
       String sku = item.first['cart_prd_sku'] as String;
       double price = item.first['cart_price'] as double;
-
       if (newQty <= 0) return;
-
-      if (newQty < oldQty) {
-        await addPosLog(
-          userId: userId,
-          prdSku: sku,
-          action: 'REDUCE',
-          oldQty: oldQty,
-          newQty: newQty,
-          description: 'Pengurangan kuantitas di keranjang'
-        );
-      }
-
-      await db.update(
-        'pos_cart',
-        {
-          'cart_qty': newQty,
-          'cart_subtotal': newQty * price
-        },
-        where: 'cart_id = ?',
-        whereArgs: [cartId],
-      );
+      if (newQty < oldQty) { await addPosLog(userId: userId, prdSku: sku, action: 'REDUCE', oldQty: oldQty, newQty: newQty, description: 'Pengurangan kuantitas di keranjang'); }
+      await db.update('pos_cart', { 'cart_qty': newQty, 'cart_subtotal': newQty * price }, where: 'cart_id = ?', whereArgs: [cartId]);
     }
   }
 
@@ -383,27 +298,17 @@ class DatabaseHelper {
 
   Future<void> removeFromCart(int userId, int cartId) async {
     final db = await instance.database;
-    
     final item = await db.query('pos_cart', where: 'cart_id = ?', whereArgs: [cartId]);
     if (item.isNotEmpty) {
       int oldQty = item.first['cart_qty'] as int;
       String sku = item.first['cart_prd_sku'] as String;
-
-      await addPosLog(
-        userId: userId,
-        prdSku: sku,
-        action: 'DELETE',
-        oldQty: oldQty,
-        newQty: 0,
-        description: 'Penghapusan item dari keranjang'
-      );
-
+      await addPosLog(userId: userId, prdSku: sku, action: 'DELETE', oldQty: oldQty, newQty: 0, description: 'Penghapusan item dari keranjang');
       await db.delete('pos_cart', where: 'cart_id = ?', whereArgs: [cartId]);
     }
   }
 
   // ==========================================
-  // FUNGSI TRANSAKSI PENJUALAN (SALES)
+  // FUNGSI TRANSAKSI PENJUALAN
   // ==========================================
 
   Future<List<Map<String, dynamic>>> getSalesHistory({required String startDate, required String endDate}) async {
@@ -417,138 +322,57 @@ class DatabaseHelper {
     ''', [startDate, endDate]);
   }
 
-  Future<String> processPayment({
-    required int userId,
-    required double subtotal,
-    required double paidAmount,
-    required double changeAmount,
-    String paymentMethod = 'Tunai',
-  }) async {
+  Future<String> processPayment({required int userId, required double subtotal, required double paidAmount, required double changeAmount, String paymentMethod = 'Tunai'}) async {
     final db = await instance.database;
-    
     String datePart = DateFormat('yyyyMMdd').format(DateTime.now());
     final lastSale = await db.rawQuery('SELECT sls_invoice_number FROM sales ORDER BY sls_transaction_date DESC LIMIT 1');
     int sequence = 1;
     if (lastSale.isNotEmpty) {
       String lastInv = lastSale.first['sls_invoice_number'] as String;
-      if (lastInv.contains(datePart)) {
-        String lastSeqStr = lastInv.split('-').last;
-        sequence = int.parse(lastSeqStr) + 1;
-      }
+      if (lastInv.contains(datePart)) { sequence = int.parse(lastInv.split('-').last) + 1; }
     }
     String invoiceNumber = 'INV-$datePart-${sequence.toString().padLeft(4, '0')}';
-
     await db.transaction((txn) async {
       final cartItems = await txn.query('pos_cart', where: 'cart_user_id = ? AND cart_status = 0', whereArgs: [userId]);
       int totalVarian = cartItems.length;
-
-      await txn.insert('sales', {
-        'sls_invoice_number': invoiceNumber,
-        'sls_user_id': userId,
-        'sls_subtotal': subtotal,
-        'sls_discount_amount': 0,
-        'sls_grand_total': subtotal,
-        'sls_paid_amount': paidAmount,
-        'sls_change_amount': changeAmount,
-        'sls_payment_method': paymentMethod,
-        'sls_total_item': totalVarian,
-      });
-
+      await txn.insert('sales', { 'sls_invoice_number': invoiceNumber, 'sls_user_id': userId, 'sls_subtotal': subtotal, 'sls_discount_amount': 0, 'sls_grand_total': subtotal, 'sls_paid_amount': paidAmount, 'sls_change_amount': changeAmount, 'sls_payment_method': paymentMethod, 'sls_total_item': totalVarian });
       for (var item in cartItems) {
-        await txn.insert('sale_items', {
-          'itm_sale_id': invoiceNumber,
-          'itm_sku': item['cart_prd_sku'],
-          'itm_discount': 0,
-          'itm_cashback': 0,
-          'itm_quantity': item['cart_qty'],
-          'itm_unit_price': item['cart_price'],
-          'itm_cost_price': item['cart_cost_price'],
-          'itm_subtotal': item['cart_subtotal'],
-        });
+        await txn.insert('sale_items', { 'itm_sale_id': invoiceNumber, 'itm_sku': item['cart_prd_sku'], 'itm_discount': 0, 'itm_cashback': 0, 'itm_quantity': item['cart_qty'], 'itm_unit_price': item['cart_price'], 'itm_cost_price': item['cart_cost_price'], 'itm_subtotal': item['cart_subtotal'] });
       }
-
-      await txn.update(
-        'pos_cart',
-        {'cart_status': 1},
-        where: 'cart_user_id = ? AND cart_status = 0',
-        whereArgs: [userId],
-      );
+      await txn.update('pos_cart', {'cart_status': 1}, where: 'cart_user_id = ? AND cart_status = 0', whereArgs: [userId]);
     });
-
     return invoiceNumber;
   }
 
   Future<Map<String, dynamic>?> getSaleByInvoice(String invoiceNumber) async {
     final db = await instance.database;
-    final sale = await db.rawQuery('''
-      SELECT s.*, u.usr_username 
-      FROM sales s
-      JOIN users u ON s.sls_user_id = u.usr_id
-      WHERE s.sls_invoice_number = ?
-    ''', [invoiceNumber]);
-    
+    final sale = await db.rawQuery('SELECT s.*, u.usr_username FROM sales s JOIN users u ON s.sls_user_id = u.usr_id WHERE s.sls_invoice_number = ?', [invoiceNumber]);
     if (sale.isEmpty) return null;
-
-    final items = await db.rawQuery('''
-      SELECT si.*, p.prd_name 
-      FROM sale_items si
-      JOIN products p ON si.itm_sku = p.prd_sku
-      WHERE si.itm_sale_id = ?
-    ''', [invoiceNumber]);
-
-    return {
-      'sale': sale.first,
-      'items': items,
-    };
+    final items = await db.rawQuery('SELECT si.*, p.prd_name FROM sale_items si JOIN products p ON si.itm_sku = p.prd_sku WHERE si.itm_sale_id = ?', [invoiceNumber]);
+    return { 'sale': sale.first, 'items': items };
   }
 
-  // ==========================================
-  // FUNGSI LAPORAN (PROFIT REPORT)
-  // ==========================================
-  
   Future<List<Map<String, dynamic>>> getProfitReport({required String startDate, required String endDate}) async {
     final db = await instance.database;
     return await db.rawQuery('''
-      SELECT 
-        DATE(sls_transaction_date) as date,
-        COUNT(*) as total_invoices,
-        SUM(sls_grand_total) as total_revenue,
-        SUM((SELECT SUM(itm_quantity * itm_cost_price) FROM sale_items WHERE itm_sale_id = sls_invoice_number)) as total_cost
-      FROM sales
-      WHERE DATE(sls_transaction_date) BETWEEN DATE(?) AND DATE(?)
-      GROUP BY DATE(sls_transaction_date)
-      ORDER BY date DESC
+      SELECT DATE(sls_transaction_date) as date, COUNT(*) as total_invoices, SUM(sls_grand_total) as total_revenue,
+      SUM((SELECT SUM(itm_quantity * itm_cost_price) FROM sale_items WHERE itm_sale_id = sls_invoice_number)) as total_cost
+      FROM sales WHERE DATE(sls_transaction_date) BETWEEN DATE(?) AND DATE(?)
+      GROUP BY DATE(sls_transaction_date) ORDER BY date DESC
     ''', [startDate, endDate]);
   }
 
-  // ==========================================
-  // FUNGSI STATISTIK (HOME)
-  // ==========================================
-  
   Future<Map<String, dynamic>> getTodayStats() async {
     final db = await instance.database;
     String today = DateFormat('yyyy-MM-dd').format(DateTime.now());
-
-    final countResult = await db.rawQuery(
-      "SELECT COUNT(*) as total FROM sales WHERE DATE(sls_transaction_date) = ?", 
-      [today]
-    );
-
-    final sumResult = await db.rawQuery(
-      "SELECT SUM(sls_grand_total) as omzet FROM sales WHERE DATE(sls_transaction_date) = ?", 
-      [today]
-    );
-
-    return {
-      'count': countResult.first['total'] ?? 0,
-      'omzet': sumResult.first['omzet'] ?? 0.0,
-    };
+    final countResult = await db.rawQuery("SELECT COUNT(*) as total FROM sales WHERE DATE(sls_transaction_date) = ?", [today]);
+    final sumResult = await db.rawQuery("SELECT SUM(sls_grand_total) as omzet FROM sales WHERE DATE(sls_transaction_date) = ?", [today]);
+    return { 'count': countResult.first['total'] ?? 0, 'omzet': sumResult.first['omzet'] ?? 0.0 };
   }
 
   // ==========================================
   // FUNGSI BACKUP & RESTORE
   // ==========================================
-
   Future<String> getDatabasePath() async {
     final dbPath = await getDatabasesPath();
     return join(dbPath, 'warung_makan.db');
@@ -556,22 +380,11 @@ class DatabaseHelper {
 
   Future<void> restoreDatabase(String backupPath) async {
     final dbPath = await getDatabasePath();
-    
-    // Close connection before replacing file
-    if (_database != null) {
-      await _database!.close();
-      _database = null;
-    }
-
+    if (_database != null) { await _database!.close(); _database = null; }
     final backupFile = File(backupPath);
     await backupFile.copy(dbPath);
-    
-    // Re-initialize database
     await database;
   }
 
-  Future close() async {
-    final db = await instance.database;
-    db.close();
-  }
+  Future close() async { final db = await instance.database; db.close(); }
 }
