@@ -95,11 +95,11 @@ class _ItemSalesReportPageState extends State<ItemSalesReportPage> {
     try {
       var excel = Excel.createExcel();
       Sheet sheetObject = excel['Sheet1'];
-      List<String> headers = (widget.groupingType == 'item') ? ['SKU', 'Produk', 'Kategori', 'Sub-Kategori', 'Qty', 'Trx', 'HPP Total', 'Jual Total', 'Margin'] : (widget.groupingType == 'category' ? ['Kategori', 'Qty', 'Trx', 'HPP Total', 'Jual Total', 'Margin'] : ['Kategori', 'Sub-Kategori', 'Qty', 'Trx', 'HPP Total', 'Jual Total', 'Margin']);
-      sheetObject.appendRow(headers.map((e) => TextCellValue(e)).toList());
+      List<dynamic> headers = (widget.groupingType == 'item') ? ['SKU', 'Produk', 'Kategori', 'Sub-Kategori', 'Qty', 'Trx', 'HPP Total', 'Jual Total', 'Margin'] : (widget.groupingType == 'category' ? ['Kategori', 'Qty', 'Trx', 'HPP Total', 'Jual Total', 'Margin'] : ['Kategori', 'Sub-Kategori', 'Qty', 'Trx', 'HPP Total', 'Jual Total', 'Margin']);
+      sheetObject.appendRow(headers);
       for (var row in _data) {
-        List<CellValue> dataRow = (widget.groupingType == 'item') ? [TextCellValue(row['itm_sku'] ?? ''), TextCellValue(row['prd_name'] ?? ''), TextCellValue(row['cat_name'] ?? ''), TextCellValue(row['cat_subname'] ?? '')] : (widget.groupingType == 'category' ? [TextCellValue(row['cat_name'] ?? '')] : [TextCellValue(row['cat_name'] ?? ''), TextCellValue(row['cat_subname'] ?? '')]);
-        dataRow.addAll([IntCellValue(row['total_qty']), IntCellValue(row['total_trx']), DoubleCellValue(row['total_cost'].toDouble()), DoubleCellValue(row['total_sales'].toDouble()), DoubleCellValue(row['total_profit'].toDouble())]);
+        List<dynamic> dataRow = (widget.groupingType == 'item') ? [row['itm_sku'] ?? '', row['prd_name'] ?? '', row['cat_name'] ?? '', row['cat_subname'] ?? ''] : (widget.groupingType == 'category' ? [row['cat_name'] ?? ''] : [row['cat_name'] ?? '', row['cat_subname'] ?? '']);
+        dataRow.addAll([row['total_qty'], row['total_trx'], row['total_cost'], row['total_sales'], row['total_profit']]);
         sheetObject.appendRow(dataRow);
       }
       var fileBytes = excel.save();
@@ -110,7 +110,7 @@ class _ItemSalesReportPageState extends State<ItemSalesReportPage> {
         final File file = File(filePath);
         await file.writeAsBytes(fileBytes, flush: true);
         await Future.delayed(const Duration(milliseconds: 500));
-        await Share.shareXFiles([XFile(file.path, name: fileName, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')], text: 'Laporan Penjualan Warung Makan');
+        await Share.shareXFiles([XFile(file.path, name: fileName)], text: 'Laporan Penjualan Warung Makan');
       }
     } catch (e) {
       if (!mounted) return;
@@ -132,33 +132,23 @@ class _ItemSalesReportPageState extends State<ItemSalesReportPage> {
               Expanded(child: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14))),
               IconButton(onPressed: _exportToExcel, icon: const Icon(Icons.file_download, color: Colors.green)),
               const SizedBox(width: 8),
-              OutlinedButton(onPressed: () async { final picked = await showDateRangePicker(context: context, initialDateRange: _selectedDateRange, firstDate: DateTime(2023), lastDate: DateTime.now()); if (picked != null) { setState(() => _selectedDateRange = picked); _loadReport(); } }, child: Text(DateFormat('dd/MM').format(_selectedDateRange.start) + "-" + DateFormat('dd/MM').format(_selectedDateRange.end), style: const TextStyle(fontSize: 11))),
+              OutlinedButton(onPressed: () async { final picked = await showDateRangePicker(context: context, initialDateRange: _selectedDateRange, firstDate: DateTime(2023), lastDate: DateTime.now()); if (picked != null) { setState(() => _selectedDateRange = picked); _loadReport(); } }, child: Text("${DateFormat('dd/MM').format(_selectedDateRange.start)}-${DateFormat('dd/MM').format(_selectedDateRange.end)}", style: const TextStyle(fontSize: 11))),
             ]),
           ),
           const Divider(height: 1),
           Expanded(
             child: _isLoading ? const Center(child: CircularProgressIndicator()) : _data.isEmpty ? const Center(child: Text('Tidak ada data.')) :
-            Scrollbar(
-              thumbVisibility: true,
-              child: ListView( // MENGGUNAKAN LISTVIEW AGAR SCROLL LEBIH STABIL DI WINDOWS
-                scrollDirection: Axis.vertical,
-                children: [
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: SizedBox(
-                      width: 800, // PAKSA LEBAR 800 PIXEL AGAR BISA DIGESER
-                      child: DataTable(
-                        sortColumnIndex: _sortColumnIndex,
-                        sortAscending: _isAscending,
-                        headingRowColor: MaterialStateProperty.all(Colors.grey[100]),
-                        columnSpacing: 20,
-                        horizontalMargin: 15,
-                        columns: _buildColumns(),
-                        rows: _data.map((row) => DataRow(cells: _buildCells(row))).toList(),
-                      ),
-                    ),
-                  ),
-                ],
+            InteractiveViewer(
+              constrained: false,
+              scaleEnabled: false,
+              child: DataTable(
+                sortColumnIndex: _sortColumnIndex,
+                sortAscending: _isAscending,
+                headingRowColor: MaterialStateProperty.all(Colors.grey[100]),
+                columnSpacing: 30,
+                horizontalMargin: 15,
+                columns: _buildColumns(),
+                rows: _data.map((row) => DataRow(cells: _buildCells(row))).toList(),
               ),
             ),
           ),
@@ -170,7 +160,7 @@ class _ItemSalesReportPageState extends State<ItemSalesReportPage> {
   List<DataColumn> _buildColumns() {
     if (widget.groupingType == 'item') {
       return [
-        DataColumn(label: const SizedBox(width: 150, child: Text('Produk')), onSort: (idx, asc) => _onSort(idx, asc)),
+        DataColumn(label: const SizedBox(width: 140, child: Text('Produk')), onSort: (idx, asc) => _onSort(idx, asc)),
         DataColumn(label: const Text('Kategori'), onSort: (idx, asc) => _onSort(idx, asc)),
         DataColumn(label: const Text('Sub'), onSort: (idx, asc) => _onSort(idx, asc)),
         DataColumn(label: const Text('Qty'), numeric: true, onSort: (idx, asc) => _onSort(idx, asc)),
@@ -180,7 +170,7 @@ class _ItemSalesReportPageState extends State<ItemSalesReportPage> {
       ];
     } else if (widget.groupingType == 'category') {
       return [
-        DataColumn(label: const SizedBox(width: 150, child: Text('Kategori')), onSort: (idx, asc) => _onSort(idx, asc)),
+        DataColumn(label: const SizedBox(width: 140, child: Text('Kategori')), onSort: (idx, asc) => _onSort(idx, asc)),
         DataColumn(label: const Text('Qty'), numeric: true, onSort: (idx, asc) => _onSort(idx, asc)),
         DataColumn(label: const Text('Trx'), numeric: true, onSort: (idx, asc) => _onSort(idx, asc)),
         DataColumn(label: const Text('Jual'), numeric: true, onSort: (idx, asc) => _onSort(idx, asc)),
