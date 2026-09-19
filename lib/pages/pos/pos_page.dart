@@ -139,8 +139,6 @@ class _PosPageState extends State<PosPage> {
   void _showPaymentDialog() {
     final TextEditingController paidController = TextEditingController();
     final formatter = NumberFormat.decimalPattern('id_ID');
-    
-    // Tetap kosongkan input awal agar kasir bisa langsung mengetik jumlah uang non-pas
     paidController.text = '';
     double paidAmount = 0; 
     
@@ -264,20 +262,32 @@ class _PosPageState extends State<PosPage> {
       context: context,
       builder: (context) => Scaffold(
         appBar: AppBar(
-          title: const Text('Pratinjau Struk', style: TextStyle(fontSize: 16)),
+          title: const Text('Pratinjau Struk', style: TextStyle(fontSize: 14)),
           backgroundColor: Colors.white,
           foregroundColor: Colors.black,
           elevation: 0.5,
           actions: [
-            IconButton(icon: const Icon(Icons.share), onPressed: () => _printService.shareReceipt(saleData: sale, items: items)),
+            IconButton(
+              tooltip: 'Cetak',
+              icon: const Icon(Icons.print, color: Colors.blue), 
+              onPressed: () => _printService.printDirect(saleData: sale, items: items)
+            ),
+            IconButton(
+              tooltip: 'Bagikan',
+              icon: const Icon(Icons.share, color: Colors.green), 
+              onPressed: () => _printService.shareReceipt(saleData: sale, items: items)
+            ),
           ],
         ),
         body: PdfPreview(
           build: (format) => doc.save(),
-          allowPrinting: true,
-          allowSharing: false, // Sudah ada di AppBar
+          allowPrinting: false, 
+          allowSharing: false,
           canChangePageFormat: false,
-          initialPageFormat: const PdfPageFormat(72 * PdfPageFormat.mm, double.infinity),
+          canChangeOrientation: false, // HAPUS tombol portrait/landscape
+          canDebug: false, 
+          maxPageWidth: 400,
+          initialPageFormat: PdfPageFormat(settings['set_paper_size'] * PdfPageFormat.mm, double.infinity),
         ),
       ),
     );

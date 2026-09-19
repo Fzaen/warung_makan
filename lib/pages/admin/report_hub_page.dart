@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'audit_log_page.dart';
 import 'profit_report_page.dart';
 import 'reprint_page.dart';
+import 'item_sales_report_page.dart';
 
 class ReportHubPage extends StatefulWidget {
   const ReportHubPage({super.key});
@@ -15,6 +16,9 @@ class _ReportHubPageState extends State<ReportHubPage> {
 
   final List<Widget> _subPages = [
     const ProfitReportPage(),
+    const ItemSalesReportPage(groupingType: 'item'),
+    const ItemSalesReportPage(groupingType: 'category'),
+    const ItemSalesReportPage(groupingType: 'subcategory'),
     const ReprintPage(),
     const AuditLogPage(),
   ];
@@ -23,15 +27,22 @@ class _ReportHubPageState extends State<ReportHubPage> {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // Sub-Navbar Atas
+        // Sub-Navbar Atas (Scrollable)
         Container(
           color: Colors.white,
-          child: Row(
-            children: [
-              _buildSubNavItem(0, Icons.bar_chart, 'Laba Rugi'),
-              _buildSubNavItem(1, Icons.print_outlined, 'Reprint'),
-              _buildSubNavItem(2, Icons.history_edu, 'Audit'),
-            ],
+          width: double.infinity,
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _buildSubNavItem(0, Icons.bar_chart, 'Laba Rugi'),
+                _buildSubNavItem(1, Icons.list_alt, 'Per Item'),
+                _buildSubNavItem(2, Icons.category_outlined, 'Per Kategori'),
+                _buildSubNavItem(3, Icons.account_tree_outlined, 'Per Sub-Kat'),
+                _buildSubNavItem(4, Icons.print_outlined, 'Reprint'),
+                _buildSubNavItem(5, Icons.history_edu, 'Audit'),
+              ],
+            ),
           ),
         ),
         const Divider(height: 1),
@@ -45,34 +56,32 @@ class _ReportHubPageState extends State<ReportHubPage> {
 
   Widget _buildSubNavItem(int index, IconData icon, String label) {
     bool isSelected = _currentSubIndex == index;
-    return Expanded(
-      child: InkWell(
-        onTap: () => setState(() => _currentSubIndex = index),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          decoration: BoxDecoration(
-            border: Border(
-              bottom: BorderSide(
-                color: isSelected ? Colors.blue : Colors.transparent,
-                width: 2,
-              ),
+    return InkWell(
+      onTap: () => setState(() => _currentSubIndex = index),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(
+              color: isSelected ? Colors.blue : Colors.transparent,
+              width: 2,
             ),
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, color: isSelected ? Colors.blue : Colors.grey, size: 20),
-              const SizedBox(height: 4),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                  color: isSelected ? Colors.blue : Colors.grey,
-                ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: isSelected ? Colors.blue : Colors.grey, size: 18),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                color: isSelected ? Colors.blue : Colors.grey,
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

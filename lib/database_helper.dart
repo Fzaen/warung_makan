@@ -46,13 +46,13 @@ class DatabaseHelper {
         final saleItemsInfo = await db.rawQuery("PRAGMA table_info(sale_items)");
         bool hasCostPrice = saleItemsInfo.any((col) => col['name'] == 'itm_cost_price');
 
-        // Cek kolom baru 'set_paper_size'
         final settingsInfo = await db.rawQuery("PRAGMA table_info(app_settings)");
         bool hasPaperSize = settingsInfo.any((col) => col['name'] == 'set_paper_size');
+        bool hasMargin = settingsInfo.any((col) => col['name'] == 'set_margin');
         
         await db.close();
         
-        if (usersTable.isEmpty || cartTable.isEmpty || logTable.isEmpty || settingsTable.isEmpty || !hasPrdActive || !hasCostPrice || !hasPaperSize) {
+        if (usersTable.isEmpty || cartTable.isEmpty || logTable.isEmpty || settingsTable.isEmpty || !hasPrdActive || !hasCostPrice || !hasPaperSize || !hasMargin) {
           print("Skema database versi lama atau tidak lengkap. Menimpa dengan file assets...");
           shouldCopy = true;
         }
@@ -127,6 +127,27 @@ class DatabaseHelper {
   Future<int> updateUser(int id, Map<String, dynamic> user) async {
     final db = await instance.database;
     return await db.update('users', user, where: 'usr_id = ?', whereArgs: [id]);
+  }
+
+  // ==========================================
+  // FUNGSI MASTER CATEGORY (CRUD)
+  // ==========================================
+  Future<int> addCategory(String name, String subname) async {
+    final db = await instance.database;
+    return await db.insert('categories', {'cat_name': name, 'cat_subname': subname});
+  }
+
+  Future<int> updateCategory(int id, String name, String subname) async {
+    final db = await instance.database;
+    return await db.update('categories', {'cat_name': name, 'cat_subname': subname}, where: 'cat_id = ?', whereArgs: [id]);
+  }
+
+  Future<int> deleteCategory(int id) async {
+    final db = await instance.database;
+    // Cek apakah ada produk yang pakai kategori ini
+    final products = await db.query('products', where: 'prd_category_id = ?', whereArgs: [id]);
+    if (products.isNotEmpty) return -1; // Tidak boleh hapus jika ada produk
+    return await db.delete('categories', where: 'cat_id = ?', whereArgs: [id]);
   }
 
   Future<List<Map<String, dynamic>>> getAllProducts({String? mainCategory, String? query}) async {
@@ -216,7 +237,8 @@ class DatabaseHelper {
       'set_address': 'Jl. Raya Kuin No. 123',
       'set_phone': '0812-3456-7890',
       'set_default_printer': null,
-      'set_paper_size': 80, // Default 80mm
+      'set_paper_size': 80,
+      'set_margin': 5.0,
     };
   }
 
@@ -310,7 +332,6 @@ class DatabaseHelper {
   // ==========================================
   // FUNGSI TRANSAKSI PENJUALAN
   // ==========================================
-
   Future<List<Map<String, dynamic>>> getSalesHistory({required String startDate, required String endDate}) async {
     final db = await instance.database;
     return await db.rawQuery('''
@@ -362,6 +383,70 @@ class DatabaseHelper {
     ''', [startDate, endDate]);
   }
 
+  Future<List<Map<String, dynamic>>> getSalesByItemReport({required String startDate, required String endDate}) async {
+    final db = await instance.database;
+    return await db.rawQuery('''
+      SELECT 
+        si.itm_sku, 
+        p.prd_name,
+        c.cat_name,
+        c.cat_subname,
+        SUM(si.itm_quantity) as total_qty,
+        SUM(si.itm_quantity * si.itm_cost_price) as total_cost,
+        SUM(si.itm_subtotal) as total_sales,
+        SUM(si.itm_subtotal - (si.itm_quantity * si.itm_cost_price)) as total_profit,
+        COUNT(DISTINCT si.itm_sale_id) as total_trx
+      FROM sale_items si
+      JOIN products p ON si.itm_sku = p.prd_sku
+      JOIN categories c ON p.prd_category_id = c.cat_id
+      JOIN sales s ON si.itm_sale_id = s.sls_invoice_number
+      WHERE DATE(s.sls_transaction_date) BETWEEN DATE(?) AND DATE(?)
+      GROUP BY si.itm_sku, p.prd_name, c.cat_name, c.cat_subname
+      ORDER BY total_qty DESC
+    ''', [startDate, endDate]);
+  }
+
+  Future<List<Map<String, dynamic>>> getSalesByCategoryReport({required String startDate, required String endDate}) async {
+    final db = await instance.database;
+    return await db.rawQuery('''
+      SELECT 
+        c.cat_name,
+        SUM(si.itm_quantity) as total_qty,
+        SUM(si.itm_quantity * si.itm_cost_price) as total_cost,
+        SUM(si.itm_subtotal) as total_sales,
+        SUM(si.itm_subtotal - (si.itm_quantity * si.itm_cost_price)) as total_profit,
+        COUNT(DISTINCT si.itm_sale_id) as total_trx
+      FROM sale_items si
+      JOIN products p ON si.itm_sku = p.prd_sku
+      JOIN categories c ON p.prd_category_id = c.cat_id
+      JOIN sales s ON si.itm_sale_id = s.sls_invoice_number
+      WHERE DATE(s.sls_transaction_date) BETWEEN DATE(?) AND DATE(?)
+      GROUP BY c.cat_name
+      ORDER BY total_sales DESC
+    ''', [startDate, endDate]);
+  }
+
+  Future<List<Map<String, dynamic>>> getSalesBySubCategoryReport({required String startDate, required String endDate}) async {
+    final db = await instance.database;
+    return await db.rawQuery('''
+      SELECT 
+        c.cat_name,
+        c.cat_subname,
+        SUM(si.itm_quantity) as total_qty,
+        SUM(si.itm_quantity * si.itm_cost_price) as total_cost,
+        SUM(si.itm_subtotal) as total_sales,
+        SUM(si.itm_subtotal - (si.itm_quantity * si.itm_cost_price)) as total_profit,
+        COUNT(DISTINCT si.itm_sale_id) as total_trx
+      FROM sale_items si
+      JOIN products p ON si.itm_sku = p.prd_sku
+      JOIN categories c ON p.prd_category_id = c.cat_id
+      JOIN sales s ON si.itm_sale_id = s.sls_invoice_number
+      WHERE DATE(s.sls_transaction_date) BETWEEN DATE(?) AND DATE(?)
+      GROUP BY c.cat_name, c.cat_subname
+      ORDER BY total_sales DESC
+    ''', [startDate, endDate]);
+  }
+
   Future<Map<String, dynamic>> getTodayStats() async {
     final db = await instance.database;
     String today = DateFormat('yyyy-MM-dd').format(DateTime.now());
@@ -384,6 +469,34 @@ class DatabaseHelper {
     final backupFile = File(backupPath);
     await backupFile.copy(dbPath);
     await database;
+  }
+
+  // ==========================================
+  // FUNGSI PEMBERSIHAN FILE TEMPORARY
+  // ==========================================
+  Future<void> clearExportFolder() async {
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final folderPath = join(directory.path, 'exports');
+      final folder = Directory(folderPath);
+      if (await folder.exists()) {
+        await folder.delete(recursive: true);
+        print("Folder export dibersihkan.");
+      }
+      await folder.create(recursive: true);
+    } catch (e) {
+      print("Gagal membersihkan folder export: $e");
+    }
+  }
+
+  Future<String> getExportPath(String fileName) async {
+    final directory = await getApplicationDocumentsDirectory();
+    final folderPath = join(directory.path, 'exports');
+    final folder = Directory(folderPath);
+    if (!await folder.exists()) {
+      await folder.create(recursive: true);
+    }
+    return join(folderPath, fileName);
   }
 
   Future close() async { final db = await instance.database; db.close(); }

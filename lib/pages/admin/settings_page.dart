@@ -17,6 +17,7 @@ class _SettingsPageState extends State<SettingsPage> {
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _addressController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
+  final TextEditingController _marginController = TextEditingController();
   List<Printer> _availablePrinters = [];
   String? _selectedPrinterName;
   int _selectedPaperSize = 80;
@@ -37,6 +38,7 @@ class _SettingsPageState extends State<SettingsPage> {
       _phoneController.text = settings['set_phone'] ?? '';
       _selectedPrinterName = settings['set_default_printer'];
       _selectedPaperSize = settings['set_paper_size'] ?? 80;
+      _marginController.text = (settings['set_margin'] ?? 5.0).toString();
       _isLoading = false;
     });
   }
@@ -53,6 +55,7 @@ class _SettingsPageState extends State<SettingsPage> {
       'set_phone': _phoneController.text,
       'set_default_printer': _selectedPrinterName,
       'set_paper_size': _selectedPaperSize,
+      'set_margin': double.tryParse(_marginController.text) ?? 5.0,
     });
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pengaturan berhasil disimpan')));
@@ -118,14 +121,28 @@ class _SettingsPageState extends State<SettingsPage> {
               onChanged: (val) => setState(() => _selectedPrinterName = val),
             ),
             const SizedBox(height: 10),
-            DropdownButtonFormField<int>(
-              value: _selectedPaperSize,
-              decoration: const InputDecoration(labelText: 'Ukuran Kertas', border: OutlineInputBorder(), prefixIcon: Icon(Icons.straighten, size: 20)),
-              items: const [
-                DropdownMenuItem(value: 58, child: Text('58 mm (Kecil)')),
-                DropdownMenuItem(value: 80, child: Text('80 mm (Besar)')),
+            Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<int>(
+                    value: _selectedPaperSize,
+                    decoration: const InputDecoration(labelText: 'Ukuran Kertas', border: OutlineInputBorder(), prefixIcon: Icon(Icons.straighten, size: 20)),
+                    items: const [
+                      DropdownMenuItem(value: 58, child: Text('58 mm')),
+                      DropdownMenuItem(value: 80, child: Text('80 mm')),
+                    ],
+                    onChanged: (val) => setState(() => _selectedPaperSize = val!),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: _marginController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Margin (mm)', border: OutlineInputBorder(), prefixIcon: Icon(Icons.settings_overscan, size: 20)),
+                  ),
+                ),
               ],
-              onChanged: (val) => setState(() => _selectedPaperSize = val!),
             ),
             const SizedBox(height: 24),
 

@@ -1,9 +1,8 @@
 import 'dart:io';
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:intl/intl.dart';
 import '../../database_helper.dart';
+import 'master_category_page.dart';
 
 class MasterProductPage extends StatefulWidget {
   const MasterProductPage({super.key});
@@ -13,197 +12,247 @@ class MasterProductPage extends StatefulWidget {
 }
 
 class _MasterProductPageState extends State<MasterProductPage> {
-  List<Map<String, dynamic>> _products = [];
-  List<Map<String, dynamic>> _categories = [];
-  String? _filterCategory;
-  bool _isLoading = true;
-  
-  final TextEditingController _searchController = TextEditingController();
-  Timer? _debounce;
+  int _subSelectedIndex = 0;
 
-  final _currencyFormat = NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
+  @override
+  Widget build(BuildContext context) {
+    // Navigasi Khusus saat masuk menu Produk (Home, POS dsb hilang)
+    return Scaffold(
+      body: Column(
+        children: [
+          Expanded(
+            child: _subSelectedIndex == 0 
+              ? const ProductListView() 
+              : const MasterCategoryPage(),
+          ),
+        ],
+      ),
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(border: Border(top: BorderSide(color: Colors.grey[200]!, width: 1))),
+        child: BottomNavigationBar(
+          currentIndex: _subSelectedIndex,
+          onTap: (i) => setState(() => _subSelectedIndex = i),
+          selectedItemColor: Colors.blue,
+          unselectedItemColor: Colors.grey,
+          selectedFontSize: 12,
+          unselectedFontSize: 12,
+          items: const [
+            BottomNavigationBarItem(icon: Icon(Icons.fastfood), label: 'Item Produk'),
+            BottomNavigationBarItem(icon: Icon(Icons.category), label: 'Kategori'),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class ProductListView extends StatefulWidget {
+  const ProductListView({super.key});
+
+  @override
+  State<ProductListView> createState() => _ProductListViewState();
+}
+
+class _ProductListViewState extends State<ProductListView> {
+  List<Map<String, dynamic>> _products = [];
+  List<String> _mainCategories = [];
+  String? _selectedCategory;
+  bool _isLoading = true;
+  final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _loadData();
+    _loadInitialData();
   }
 
-  @override
-  void dispose() {
-    _searchController.dispose();
-    _debounce?.cancel();
-    super.dispose();
+  Future<void> _loadInitialData() async {
+    final cats = await DatabaseHelper.instance.getMainCategories();
+    setState(() => _mainCategories = cats);
+    _loadProducts();
   }
 
-  Future<void> _loadData() async {
+  Future<void> _loadProducts() async {
     setState(() => _isLoading = true);
-    final prods = await DatabaseHelper.instance.getAllProducts(
-      mainCategory: _filterCategory,
+    final data = await DatabaseHelper.instance.getAllProducts(
+      mainCategory: _selectedCategory,
       query: _searchController.text
     );
-    final cats = await DatabaseHelper.instance.getCategories();
     setState(() {
-      _products = prods;
-      _categories = cats;
+      _products = data;
       _isLoading = false;
     });
   }
 
-  void _onSearchChanged(String query) {
-    if (_debounce?.isActive ?? false) _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 500), () {
-      _loadData();
-    });
-  }
+  void _showForm(Map<String, dynamic>? product) async {
+    final categories = await DatabaseHelper.instance.getCategories();
+    if (categories.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Tambahkan kategori terlebih dahulu!')));
+      return;
+    }
 
-  Widget _buildProductImage(String? fileName, {double size = 50}) {
-    if (fileName == null || fileName.isEmpty) return Icon(Icons.fastfood, size: size, color: Colors.grey);
-    return FutureBuilder<File?>(
-      future: DatabaseHelper.instance.getLocalProductImage(fileName),
-      builder: (context, snapshot) {
-        if (snapshot.hasData && snapshot.data != null) return Image.file(snapshot.data!, width: size, height: size, fit: BoxFit.cover);
-        return Image.asset('assets/img/$fileName', width: size, height: size, fit: BoxFit.cover, errorBuilder: (c, e, s) => Icon(Icons.fastfood, size: size, color: Colors.grey));
-      },
-    );
-  }
-
-  void _showProductForm({Map<String, dynamic>? product}) {
-    final isEdit = product != null;
-    final skuController = TextEditingController(text: isEdit ? product['prd_sku'] : '');
-    final nameController = TextEditingController(text: isEdit ? product['prd_name'] : '');
-    final costPriceController = TextEditingController(text: isEdit ? product['prd_cost_price'].toString() : '');
-    final sellingPriceController = TextEditingController(text: isEdit ? product['prd_selling_price'].toString() : '');
-    final unitController = TextEditingController(text: isEdit ? product['prd_unit'] : 'pcs');
-    String? selectedMainCat = isEdit ? product['cat_name'] : null;
-    int? selectedSubCatId = isEdit ? product['prd_category_id'] : null;
-    int isActive = isEdit ? (product['prd_is_active'] ?? 1) : 1;
-    String? currentImage = isEdit ? product['prd_image'] : null;
+    final nameController = TextEditingController(text: product?['prd_name']);
+    final costController = TextEditingController(text: product?['prd_cost_price']?.toString());
+    final sellController = TextEditingController(text: product?['prd_selling_price']?.toString());
+    int? selectedCatId = product?['prd_category_id'];
+    String? currentImage = product?['prd_image'];
     File? newImageFile;
 
+    if (!mounted) return;
     showDialog(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setModalState) {
-          List<String> mainCats = _categories.map((c) => c['cat_name'] as String).toSet().toList();
-          List<Map<String, dynamic>> subCats = selectedMainCat == null ? [] : _categories.where((c) => c['cat_name'] == selectedMainCat).toList();
-          return AlertDialog(
-            title: Text(isEdit ? 'Edit Produk' : 'Tambah Produk Baru', style: const TextStyle(fontSize: 16)),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  GestureDetector(
-                    onTap: () async {
-                      final picker = ImagePicker();
-                      final img = await picker.pickImage(source: ImageSource.gallery);
-                      if (img != null) setModalState(() => newImageFile = File(img.path));
-                    },
-                    child: Container(height: 100, width: double.infinity, decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(8)), child: newImageFile != null ? Image.file(newImageFile!, fit: BoxFit.cover) : (currentImage != null ? _buildProductImage(currentImage, size: 80) : const Icon(Icons.add_a_photo))),
+      builder: (context) => StatefulBuilder(builder: (context, setModalState) {
+        return AlertDialog(
+          title: Text(product == null ? 'Tambah Produk' : 'Edit Produk'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                GestureDetector(
+                  onTap: () async {
+                    final picker = ImagePicker();
+                    final picked = await picker.pickImage(source: ImageSource.gallery);
+                    if (picked != null) setModalState(() => newImageFile = File(picked.path));
+                  },
+                  child: Container(
+                    height: 100, width: 100,
+                    decoration: BoxDecoration(border: Border.all(color: Colors.grey), borderRadius: BorderRadius.circular(8)),
+                    child: newImageFile != null 
+                      ? Image.file(newImageFile!, fit: BoxFit.cover) 
+                      : (currentImage != null 
+                          ? Image.asset('assets/img/$currentImage', fit: BoxFit.cover, errorBuilder: (c, e, s) => const Icon(Icons.add_a_photo)) 
+                          : const Icon(Icons.add_a_photo)),
                   ),
-                  DropdownButtonFormField<String>(value: selectedMainCat, decoration: const InputDecoration(labelText: 'Kategori Utama'), items: mainCats.map((cat) => DropdownMenuItem(value: cat, child: Text(cat))).toList(), onChanged: isEdit ? null : (val) async { if (val != null) { String nextSku = await DatabaseHelper.instance.generateNextSku(val); setModalState(() { selectedMainCat = val; selectedSubCatId = null; skuController.text = nextSku; }); } }),
-                  DropdownButtonFormField<int>(value: selectedSubCatId, decoration: const InputDecoration(labelText: 'Sub Kategori'), items: subCats.map((cat) => DropdownMenuItem<int>(value: cat['cat_id'], child: Text(cat['cat_subname'] ?? '-'))).toList(), onChanged: (val) => setModalState(() => selectedSubCatId = val)),
-                  TextField(controller: skuController, decoration: const InputDecoration(labelText: 'SKU'), enabled: false),
-                  TextField(controller: nameController, decoration: const InputDecoration(labelText: 'Nama Produk')),
-                  Row(children: [Expanded(child: TextField(controller: costPriceController, decoration: const InputDecoration(labelText: 'Hrg Modal'), keyboardType: TextInputType.number)), const SizedBox(width: 10), Expanded(child: TextField(controller: sellingPriceController, decoration: const InputDecoration(labelText: 'Hrg Jual'), keyboardType: TextInputType.number))]),
-                  TextField(controller: unitController, decoration: const InputDecoration(labelText: 'Satuan')),
-                  SwitchListTile(title: const Text('Aktif'), value: isActive == 1, onChanged: (val) => setModalState(() => isActive = val ? 1 : 0)),
-                ],
-              ),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<int>(
+                  value: selectedCatId,
+                  decoration: const InputDecoration(labelText: 'Pilih Kategori'),
+                  items: categories.map((c) => DropdownMenuItem<int>(value: c['cat_id'], child: Text('${c['cat_name']} - ${c['cat_subname']}'))).toList(),
+                  onChanged: (val) => setModalState(() => selectedCatId = val),
+                ),
+                TextField(controller: nameController, decoration: const InputDecoration(labelText: 'Nama Produk')),
+                TextField(controller: costController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'HPP (Modal)')),
+                TextField(controller: sellController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Harga Jual')),
+              ],
             ),
-            actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('BATAL')), ElevatedButton(onPressed: (selectedSubCatId == null || skuController.text.isEmpty) ? null : () async { String? finalImage = currentImage; if (newImageFile != null) finalImage = await DatabaseHelper.instance.saveProductImage(newImageFile!); final productData = { 'prd_sku': skuController.text, 'prd_category_id': selectedSubCatId, 'prd_name': nameController.text, 'prd_cost_price': double.tryParse(costPriceController.text) ?? 0, 'prd_selling_price': double.tryParse(sellingPriceController.text) ?? 0, 'prd_unit': unitController.text, 'prd_image': finalImage, 'prd_is_active': isActive }; if (isEdit) await DatabaseHelper.instance.updateProduct(product['prd_sku'], productData); else await DatabaseHelper.instance.addProduct(productData); Navigator.pop(context); _loadData(); }, child: const Text('SIMPAN'))],
-          );
-        },
-      ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('BATAL')),
+            ElevatedButton(
+              onPressed: () async {
+                if (selectedCatId == null || nameController.text.isEmpty) return;
+                String? imageName = currentImage;
+                if (newImageFile != null) imageName = await DatabaseHelper.instance.saveProductImage(newImageFile!);
+
+                if (product == null) {
+                  final cat = categories.firstWhere((c) => c['cat_id'] == selectedCatId);
+                  final sku = await DatabaseHelper.instance.generateNextSku(cat['cat_name']);
+                  await DatabaseHelper.instance.addProduct({
+                    'prd_sku': sku, 'prd_category_id': selectedCatId, 'prd_name': nameController.text.toUpperCase(),
+                    'prd_cost_price': double.tryParse(costController.text) ?? 0, 'prd_selling_price': double.tryParse(sellController.text) ?? 0,
+                    'prd_image': imageName, 'prd_is_active': 1,
+                  });
+                } else {
+                  await DatabaseHelper.instance.updateProduct(product['prd_sku'], {
+                    'prd_category_id': selectedCatId, 'prd_name': nameController.text.toUpperCase(),
+                    'prd_cost_price': double.tryParse(costController.text) ?? 0, 'prd_selling_price': double.tryParse(sellController.text) ?? 0,
+                    'prd_image': imageName,
+                  });
+                }
+                Navigator.pop(context); _loadProducts();
+              },
+              child: const Text('SIMPAN'),
+            ),
+          ],
+        );
+      }),
     );
+  }
+
+  void _toggleStatus(String sku, int currentStatus) async {
+    await DatabaseHelper.instance.updateProduct(sku, {'prd_is_active': currentStatus == 1 ? 0 : 1});
+    _loadProducts();
   }
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isMobile = screenWidth < 600;
-
     return Scaffold(
       appBar: AppBar(
-        toolbarHeight: isMobile ? 100 : 110, // Berikan ruang untuk search bar
+        title: const Text('Master Produk', style: TextStyle(fontSize: 16)),
         backgroundColor: Colors.white,
-        elevation: 0,
-        title: Column(
-          children: [
-            // Baris 1: Filter Chips
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  _buildFilterChip(null, 'Semua'),
-                  const SizedBox(width: 8),
-                  _buildFilterChip('Makanan', 'Makanan'),
-                  const SizedBox(width: 8),
-                  _buildFilterChip('Minuman', 'Minuman'),
-                  const SizedBox(width: 8),
-                  _buildFilterChip('Cemilan', 'Cemilan'),
-                ],
-              ),
-            ),
-            // Baris 2: Search Bar Minimalis
-            Padding(
-              padding: const EdgeInsets.only(top: 8.0, bottom: 4.0),
-              child: SizedBox(
-                height: 35,
+        elevation: 0.5,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(100),
+          child: Column(
+            children: [
+              // Search Bar
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: TextField(
                   controller: _searchController,
-                  onChanged: _onSearchChanged,
-                  style: const TextStyle(fontSize: 12),
+                  onChanged: (_) => _loadProducts(),
                   decoration: InputDecoration(
-                    hintText: 'Cari produk atau SKU...',
-                    prefixIcon: const Icon(Icons.search, size: 16),
-                    suffixIcon: _searchController.text.isNotEmpty 
-                      ? IconButton(icon: const Icon(Icons.clear, size: 16), onPressed: () { _searchController.clear(); _loadData(); }) 
-                      : null,
-                    contentPadding: const EdgeInsets.symmetric(vertical: 0),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: BorderSide(color: Colors.grey[300]!)),
-                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: BorderSide(color: Colors.grey[300]!)),
-                    filled: true,
-                    fillColor: Colors.grey[50],
+                    hintText: 'Cari nama atau SKU...',
+                    prefixIcon: const Icon(Icons.search),
+                    filled: true, fillColor: Colors.grey[100],
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
                   ),
                 ),
               ),
-            ),
-          ],
+              // Category Filter Scrollable
+              SizedBox(
+                height: 40,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  children: [
+                    FilterChip(
+                      label: const Text('Semua'),
+                      selected: _selectedCategory == null,
+                      onSelected: (v) { setState(() => _selectedCategory = null); _loadProducts(); },
+                    ),
+                    ..._mainCategories.map((c) => Padding(
+                      padding: const EdgeInsets.only(left: 8.0),
+                      child: FilterChip(
+                        label: Text(c),
+                        selected: _selectedCategory == c,
+                        onSelected: (v) { setState(() => _selectedCategory = c); _loadProducts(); },
+                      ),
+                    )),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
+          ),
         ),
       ),
-      floatingActionButton: FloatingActionButton(onPressed: () => _showProductForm(), child: const Icon(Icons.add)),
-      body: _isLoading ? const Center(child: CircularProgressIndicator()) : _products.isEmpty ? const Center(child: Text('Kosong.')) : ListView.builder(
-        padding: const EdgeInsets.all(8),
-        itemCount: _products.length,
-        itemBuilder: (context, index) {
-          final p = _products[index];
-          final bool isActive = (p['prd_is_active'] ?? 1) == 1;
-          return Card(
-            child: ListTile(
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-              leading: ClipRRect(borderRadius: BorderRadius.circular(4), child: _buildProductImage(p['prd_image'], size: isMobile ? 40 : 50)),
-              title: Text(p['prd_name'], style: TextStyle(fontWeight: FontWeight.bold, fontSize: isMobile ? 13 : 14)),
-              subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('SKU: ${p['prd_sku']} | ${p['cat_name']}', style: const TextStyle(fontSize: 10, color: Colors.blueGrey)),
-                Text('Jual: ${_currencyFormat.format(p['prd_selling_price'])}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue, fontSize: 11)),
-              ]),
-              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: isActive ? Colors.green[50] : Colors.red[50], borderRadius: BorderRadius.circular(8)), child: Text(isActive ? 'AKTIF' : 'NON', style: TextStyle(fontSize: 9, color: isActive ? Colors.green : Colors.red, fontWeight: FontWeight.bold))),
-                IconButton(icon: const Icon(Icons.edit, color: Colors.blue, size: 20), onPressed: () => _showProductForm(product: p)),
-              ]),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildFilterChip(String? category, String label) {
-    return ChoiceChip(
-      label: Text(label, style: const TextStyle(fontSize: 10)),
-      selected: _filterCategory == category,
-      onSelected: (selected) { setState(() => _filterCategory = selected ? category : null); _loadData(); },
+      body: _isLoading 
+        ? const Center(child: CircularProgressIndicator()) 
+        : ListView.builder(
+            itemCount: _products.length,
+            itemBuilder: (context, index) {
+              final p = _products[index];
+              return Card(
+                margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                child: ListTile(
+                  leading: SizedBox(width: 50, child: p['prd_image'] != null ? Image.asset('assets/img/${p['prd_image']}', fit: BoxFit.cover, errorBuilder: (c, e, s) => const Icon(Icons.fastfood)) : const Icon(Icons.fastfood)),
+                  title: Text(p['prd_name'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  subtitle: Text('[${p['prd_sku']}] Rp ${p['prd_selling_price']}'),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Switch(value: p['prd_is_active'] == 1, onChanged: (v) => _toggleStatus(p['prd_sku'], p['prd_is_active'])),
+                      IconButton(icon: const Icon(Icons.edit, color: Colors.blue, size: 20), onPressed: () => _showForm(p)),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+      floatingActionButton: FloatingActionButton(onPressed: () => _showForm(null), child: const Icon(Icons.add)),
     );
   }
 }

@@ -6,17 +6,21 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'database_helper.dart';
 import 'pages/admin/master_user_page.dart';
 import 'pages/admin/master_product_page.dart';
-import 'pages/admin/report_hub_page.dart'; // Import Baru
+import 'pages/admin/report_hub_page.dart';
 import 'pages/admin/settings_page.dart';
 import 'pages/pos/pos_page.dart';
 import 'pages/home_page.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   if (Platform.isWindows || Platform.isLinux) {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
   }
+  
+  // Bersihkan file temporary export lama saat aplikasi dibuka
+  await DatabaseHelper.instance.clearExportFolder();
+  
   runApp(const MyApp());
 }
 
@@ -174,7 +178,6 @@ class _MainNavigationState extends State<MainNavigation> {
       _pages.add(const MasterUserPage());
       _navItems.add(const BottomNavigationBarItem(icon: Icon(Icons.people_outline, size: 20), activeIcon: Icon(Icons.people, size: 22), label: 'User'));
       
-      // Menu Report Baru (Gabungan)
       _pages.add(const ReportHubPage());
       _navItems.add(const BottomNavigationBarItem(icon: Icon(Icons.assessment_outlined, size: 20), activeIcon: Icon(Icons.assessment, size: 22), label: 'Report'));
       
@@ -207,6 +210,7 @@ class _MainNavigationState extends State<MainNavigation> {
   @override
   Widget build(BuildContext context) {
     bool isPosPage = _navItems[_selectedIndex].label == 'POS';
+    bool isProductPage = _navItems[_selectedIndex].label == 'Produk';
 
     return Scaffold(
       appBar: PreferredSize(
@@ -243,7 +247,8 @@ class _MainNavigationState extends State<MainNavigation> {
         ),
       ),
       body: _pages[_selectedIndex],
-      bottomNavigationBar: isPosPage ? null : Container(
+      // Sembunyikan navbar utama jika di halaman POS atau PRODUK (karena PRODUK punya navbar sendiri)
+      bottomNavigationBar: (isPosPage || isProductPage) ? null : Container(
         decoration: BoxDecoration(border: Border(top: BorderSide(color: Colors.grey[200]!, width: 1))),
         child: BottomNavigationBar(
           currentIndex: _selectedIndex,
